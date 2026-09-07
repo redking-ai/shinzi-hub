@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Shinzi Hub",
+    "slug": "shinzi-hub",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.shinzihub.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.shinzihub.app"
+    }
+  }
+}
