@@ -6,11 +6,32 @@ import {
 import { StatusBar } from 'expo-status-bar';
 
 const countries = [
-  { label: '🇺🇸 +1 (US)', value: '+1' },
-  { label: '🇬🇧 +44 (UK)', value: '+44' },
-  { label: '🇮🇳 +91 (IN)', value: '+91' },
-  { label: '🇯🇵 +81 (JP)', value: '+81' },
+  { label: '🇺🇸 +1 (United States)', value: '+1' },
+  { label: '🇨🇦 +1 (Canada)', value: '+1' },
+  { label: '🇬🇧 +44 (United Kingdom)', value: '+44' },
+  { label: '🇮🇳 +91 (India)', value: '+91' },
+  { label: '🇧🇩 +880 (Bangladesh)', value: '+880' },
+  { label: '🇦🇺 +61 (Australia)', value: '+61' },
+  { label: '🇩🇪 +49 (Germany)', value: '+49' },
+  { label: '🇫🇷 +33 (France)', value: '+33' },
+  { label: '🇯🇵 +81 (Japan)', value: '+81' },
+  { label: '🇰🇷 +82 (South Korea)', value: '+82' },
+  { label: '🇨🇳 +86 (China)', value: '+86' },
+  { label: '🇸🇬 +65 (Singapore)', value: '+65' },
+  { label: '🇧🇷 +55 (Brazil)', value: '+55' },
+  { label: '🇲🇽 +52 (Mexico)', value: '+52' },
+  { label: '🇦🇷 +54 (Argentina)', value: '+54' },
+  { label: '🇿🇦 +27 (South Africa)', value: '+27' },
+  { label: '🇳🇬 +234 (Nigeria)', value: '+234' },
+  { label: '🇪🇬 +20 (Egypt)', value: '+20' },
+  { label: '🇸🇦 +966 (Saudi Arabia)', value: '+966' },
+  { label: '🇦🇪 +971 (UAE)', value: '+971' },
+  { label: '🇮🇹 +39 (Italy)', value: '+39' },
+  { label: '🇪🇸 +34 (Spain)', value: '+34' },
+  { label: '🇷🇺 +7 (Russia)', value: '+7' },
+  { label: '🌐 +00 (Other)', value: '+' }, // Catch-all for unlisted countries
 ];
+
 
 export default function SignUp({ onBack }) {
   const [step, setStep] = useState(1);
