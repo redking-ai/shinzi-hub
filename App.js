@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,7 +10,24 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
+// Import your new screens
+import SignUp from './screens/SignUp';
+import Login from './screens/Login';
+
 export default function App() {
+  // This state controls which screen is visible ('welcome', 'signup', or 'login')
+  const [currentScreen, setCurrentScreen] = useState('welcome');
+
+  // Routing Logic: If the state changes, show the corresponding screen
+  if (currentScreen === 'signup') {
+    return <SignUp onBack={() => setCurrentScreen('welcome')} />;
+  }
+
+  if (currentScreen === 'login') {
+    return <Login onBack={() => setCurrentScreen('welcome')} />;
+  }
+
+  // Default: Show the Welcome Screen
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -29,7 +46,7 @@ export default function App() {
             />
             <Text style={styles.title}>WELCOME TO{'\n'}SHINZI HUB</Text>
             <Text style={styles.description}>
-              Join servers, search or chat.{'\n'}Tap below to get started!
+              Join servers, search or chat.{'\n'}Tap below To Get started!
             </Text>
           </View>
 
@@ -39,7 +56,7 @@ export default function App() {
             <TouchableOpacity
               style={styles.signUpButton}
               activeOpacity={0.8}
-              onPress={() => console.log('Navigate to Sign Up')}
+              onPress={() => setCurrentScreen('signup')}
             >
               <Text style={styles.signUpButtonText}>Sign up</Text>
             </TouchableOpacity>
@@ -50,7 +67,7 @@ export default function App() {
             <TouchableOpacity
               style={styles.logInButton}
               activeOpacity={0.8}
-              onPress={() => console.log('Navigate to Log In')}
+              onPress={() => setCurrentScreen('login')}
             >
               <Text style={styles.logInButtonText}>Log in</Text>
             </TouchableOpacity>
@@ -140,4 +157,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
