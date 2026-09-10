@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, 
-  SafeAreaView, KeyboardAvoidingView, Platform, Modal 
+  SafeAreaView, KeyboardAvoidingView, Platform, Modal, Alert 
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { loginUser } from '../authService'; // Connected to backend
 
 export default function Login({ onBack }) {
   const [identity, setIdentity] = useState('');
   const [password, setPassword] = useState('');
-  
+
   // Forgot Password States
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -16,6 +17,16 @@ export default function Login({ onBack }) {
 
   // Logic Checks
   const hasNumber = /\d/.test(password);
+
+  const handleFirebaseLogin = async () => {
+    const { user, error } = await loginUser(identity.trim(), password);
+    if (error) {
+      Alert.alert('Login Failed', error);
+    } else {
+      Alert.alert('Success', `Welcome back, ${user.email}!`);
+      // Add navigation to your main app screen here
+    }
+  };
 
   const handleSendReset = () => {
     if (resetEmail.includes('@')) {
@@ -34,7 +45,7 @@ export default function Login({ onBack }) {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack}>
@@ -46,7 +57,7 @@ export default function Login({ onBack }) {
 
         {/* Content */}
         <View style={styles.content}>
-          
+
           <View style={styles.inputBox}>
             <TextInput
               style={styles.input}
@@ -68,7 +79,7 @@ export default function Login({ onBack }) {
               secureTextEntry
             />
           </View>
-          
+
           {password.length > 0 && !hasNumber && (
             <Text style={styles.errorText}>* Password must contain at least 1 number</Text>
           )}
@@ -80,7 +91,7 @@ export default function Login({ onBack }) {
           <TouchableOpacity 
             style={[styles.continueBtn, (!identity || !password || !hasNumber) && styles.disabledBtn]} 
             disabled={!identity || !password || !hasNumber}
-            onPress={() => console.log('Log In Attempted')}
+            onPress={handleFirebaseLogin}
           >
             <Text style={styles.continueText}>Continue</Text>
           </TouchableOpacity>
@@ -90,12 +101,12 @@ export default function Login({ onBack }) {
         <Modal visible={showForgotModal} transparent animationType="slide">
           <View style={styles.modalBg}>
             <View style={styles.modalContent}>
-              
+
               {!resetSent ? (
                 <>
                   <Text style={styles.modalTitle}>Reset Password</Text>
                   <Text style={styles.modalSub}>Note: For password reset you will get only an email! Must need to verify email.</Text>
-                  
+
                   <View style={styles.inputBox}>
                     <TextInput
                       style={styles.input}
@@ -126,7 +137,7 @@ export default function Login({ onBack }) {
               <TouchableOpacity style={styles.cancelBtn} onPress={closeForgotModal}>
                 <Text style={styles.cancelText}>Close</Text>
               </TouchableOpacity>
-              
+
             </View>
           </View>
         </Modal>
@@ -150,8 +161,6 @@ const styles = StyleSheet.create({
   continueBtn: { backgroundColor: '#FFFFFF', borderRadius: 28, paddingVertical: 16, alignItems: 'center', marginTop: 'auto', marginBottom: 20 },
   disabledBtn: { backgroundColor: '#333333', opacity: 0.7 },
   continueText: { color: '#000000', fontSize: 16, fontWeight: '700' },
-  
-  /* Modal Styles */
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#14141C', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
   modalTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
