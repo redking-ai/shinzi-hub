@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, 
-  SafeAreaView, Modal, FlatList, KeyboardAvoidingView, Platform 
+  SafeAreaView, Modal, KeyboardAvoidingView, Platform, Alert 
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { registerUser } from '../authService'; // Connected to backend
 
 const countries = [
   { label: '🇺🇸 +1 (United States)', value: '+1' },
@@ -29,9 +30,8 @@ const countries = [
   { label: '🇮🇹 +39 (Italy)', value: '+39' },
   { label: '🇪🇸 +34 (Spain)', value: '+34' },
   { label: '🇷🇺 +7 (Russia)', value: '+7' },
-  { label: '🌐 +00 (Other)', value: '+' }, // Catch-all for unlisted countries
+  { label: '🌐 +00 (Other)', value: '+' }, 
 ];
-
 
 export default function SignUp({ onBack }) {
   const [step, setStep] = useState(1);
@@ -53,11 +53,22 @@ export default function SignUp({ onBack }) {
   const hasNumber = /\d/.test(password);
   const isUsernameValid = username.length === 0 || /^[a-zA-Z0-9_.-]+$/.test(username);
 
+  const handleFirebaseSignUp = async () => {
+    // For now, ensuring we pass the email (contact) collected in Step 1 to Firebase
+    const { user, error } = await registerUser(contact.trim(), password);
+    if (error) {
+      Alert.alert('Sign Up Failed', error);
+    } else {
+      Alert.alert('Account Created!', `User ID: ${user.uid}\nWelcome to Shinzi Hub!`);
+      // Add navigation logic to move user into the app here
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => step === 1 ? onBack() : setStep(step - 1)}>
@@ -160,7 +171,7 @@ export default function SignUp({ onBack }) {
         {step === 3 && (
           <View style={styles.content}>
             <Text style={styles.verifySubtitle}>We sent a code to{'\n'}{contact}</Text>
-            
+
             <View style={styles.otpRow}>
               {[0, 1, 2, 3].map((i) => (
                 <View key={i} style={styles.otpBox}>
@@ -173,7 +184,7 @@ export default function SignUp({ onBack }) {
               <Text style={styles.resendText}>Resend Code</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.continueBtn} onPress={() => console.log('Account Created')}>
+            <TouchableOpacity style={styles.continueBtn} onPress={handleFirebaseSignUp}>
               <Text style={styles.continueText}>Verify & Create Account</Text>
             </TouchableOpacity>
           </View>
@@ -242,4 +253,3 @@ const styles = StyleSheet.create({
   modalOption: { paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#22222E' },
   modalOptionText: { color: '#FFFFFF', fontSize: 18, textAlign: 'center' },
 });
-
