@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, 
-  SafeAreaView, Modal, KeyboardAvoidingView, Platform, Alert 
+  SafeAreaView, Modal, KeyboardAvoidingView, Platform, Alert, Image 
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { registerEmailUser } from '../authService';
 
 export default function SignUp({ onBack }) {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Step 1: Credentials (Email Only)
+  // Step 1
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Step 2: Identity (No Photo Picker)
+  // Step 2
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [gender, setGender] = useState('');
@@ -23,41 +24,55 @@ export default function SignUp({ onBack }) {
   const [day, setDay] = useState('');
   const [month, setMonth] = useState('');
   const [year, setYear] = useState('');
+  const [profileImage, setProfileImage] = useState(null);
 
   // Validation Logic
+  const normalizedUsername = username.trim().toLowerCase();
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const hasNumber = /\d/.test(password);
-  const isUsernameValid = username.length >= 3 && /^[a-zA-Z0-9_.-]+$/.test(username);
+  const isUsernameValid = normalizedUsername.length >= 3 && /^[a-z0-9_.-]+$/.test(normalizedUsername);
 
   const isValidDate = (d, m, y) => {
     const numD = parseInt(d, 10);
     const numM = parseInt(m, 10);
     const numY = parseInt(y, 10);
     const today = new Date();
-
     if (!numD || !numM || !numY || numM < 1 || numM > 12 || numY < 1920 || numY > today.getFullYear()) return false;
-
     const parsedDate = new Date(numY, numM - 1, numD);
     const isRealDate = parsedDate.getFullYear() === numY && parsedDate.getMonth() === numM - 1 && parsedDate.getDate() === numD;
-
     let age = today.getFullYear() - numY;
     if (today.getMonth() < numM - 1 || (today.getMonth() === numM - 1 && today.getDate() < numD)) age--;
-
     return isRealDate && age >= 13;
   };
 
   const isStep1Valid = isEmail && password.length >= 6 && hasNumber;
   const isStep2Valid = name.trim().length > 0 && isUsernameValid && isValidDate(day, month, year) && gender !== '';
 
+  const handleAvatarPress = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'], 
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setProfileImage(result.assets[0].uri);
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Unable to access gallery.');
+    }
+  };
+
   const executeSignUp = async () => {
     setIsSubmitting(true);
     try {
       const profileData = {
         name: name.trim(),
-        username: username.trim(),
+        username: normalizedUsername,
         gender,
         dob: `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`,
-        profileImageUri: null, // Default avatar will be used in the app
+        profileImageUri: profileImage, 
       };
 
       const { user, error } = await registerEmailUser(email.trim(), password, profileData);
@@ -65,8 +80,8 @@ export default function SignUp({ onBack }) {
       if (error) {
         Alert.alert('Sign Up Failed', error);
       } else {
-        Alert.alert('Account Created!', `Welcome to Shinzi Hub, ${profileData.name}!`);
-        // Navigate to your main app screen here
+        Alert.alert('Account Created!', `Welcome to Shinzi Hub, ${profileData.name}! Please check your email to verify your account.`);
+        // NOTE: Your AuthContext listener or navigation.replace('Home') handles routing here.
       }
     } catch (err) {
       Alert.alert('Error', 'An unexpected error occurred.');
@@ -79,7 +94,6 @@ export default function SignUp({ onBack }) {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        
         <View style={styles.header}>
           <TouchableOpacity onPress={() => step === 1 ? onBack() : setStep(1)}>
             <Text style={styles.backText}>{'< Back'}</Text>
@@ -88,52 +102,34 @@ export default function SignUp({ onBack }) {
           <View style={{ width: 50 }} />
         </View>
 
-        {/* STEP 1: Email & Password */}
         {step === 1 && (
           <View style={styles.content}>
             <View style={styles.inputBox}>
-              <TextInput 
-                style={styles.input} 
-                placeholder="Email address" 
-                placeholderTextColor="#8E8EA0" 
-                value={email} 
-                onChangeText={setEmail} 
-                keyboardType="email-address" 
-                autoCapitalize="none" 
-              />
+              <TextInput style={styles.input} placeholder="Email address" placeholderTextColor="#8E8EA0" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
             </View>
             <View style={styles.inputBox}>
-              <TextInput 
-                style={styles.input} 
-                placeholder="Password" 
-                placeholderTextColor="#8E8EA0" 
-                value={password} 
-                onChangeText={setPassword} 
-                secureTextEntry 
-              />
+              <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#8E8EA0" value={password} onChangeText={setPassword} secureTextEntry />
             </View>
-            {password.length > 0 && !hasNumber && (
-              <Text style={styles.errorText}>* Password must contain at least 1 number</Text>
-            )}
-            <TouchableOpacity 
-              style={[styles.continueBtn, !isStep1Valid && styles.disabledBtn]} 
-              disabled={!isStep1Valid} 
-              onPress={() => setStep(2)}
-            >
+            {password.length > 0 && !hasNumber && <Text style={styles.errorText}>* Password must contain at least 1 number</Text>}
+            <TouchableOpacity style={[styles.continueBtn, !isStep1Valid && styles.disabledBtn]} disabled={!isStep1Valid} onPress={() => setStep(2)}>
               <Text style={styles.continueText}>Continue</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* STEP 2: Profile Setup */}
         {step === 2 && (
           <View style={styles.content}>
-            
-            {/* Static Avatar with Vector Icon */}
             <View style={styles.avatarContainer}>
-              <View style={styles.avatarCircle}>
-                <Ionicons name="person" size={40} color="#FFFFFF" />
-              </View>
+              <TouchableOpacity style={styles.avatarCircle} onPress={handleAvatarPress}>
+                {profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+                ) : (
+                  <Ionicons name="person" size={40} color="#FFFFFF" />
+                )}
+                <View style={styles.pencilBadge}>
+                  <Ionicons name="pencil" size={14} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.inputBox}>
@@ -143,36 +139,21 @@ export default function SignUp({ onBack }) {
             <View style={[styles.inputBox, username.length > 0 && !isUsernameValid && styles.errorBox]}>
               <TextInput style={styles.input} placeholder="Username (min 3 chars)" placeholderTextColor="#8E8EA0" value={username} onChangeText={setUsername} autoCapitalize="none" />
             </View>
-            {username.length > 0 && !isUsernameValid && (
-              <Text style={styles.errorText}>* Use letters, numbers, _, -, or . (at least 3 characters)</Text>
-            )}
+            {username.length > 0 && !isUsernameValid && <Text style={styles.errorText}>* Use letters, numbers, _, -, or . (at least 3 characters)</Text>}
 
             <View style={styles.row}>
-              <View style={[styles.inputBox, styles.flex1, { marginRight: 8 }]}>
-                <TextInput style={styles.input} placeholder="DD" placeholderTextColor="#8E8EA0" maxLength={2} keyboardType="number-pad" value={day} onChangeText={setDay} />
-              </View>
-              <View style={[styles.inputBox, styles.flex1, { marginRight: 8 }]}>
-                <TextInput style={styles.input} placeholder="MM" placeholderTextColor="#8E8EA0" maxLength={2} keyboardType="number-pad" value={month} onChangeText={setMonth} />
-              </View>
-              <View style={[styles.inputBox, styles.flex2]}>
-                <TextInput style={styles.input} placeholder="YYYY" placeholderTextColor="#8E8EA0" maxLength={4} keyboardType="number-pad" value={year} onChangeText={setYear} />
-              </View>
+              <View style={[styles.inputBox, styles.flex1, { marginRight: 8 }]}><TextInput style={styles.input} placeholder="DD" placeholderTextColor="#8E8EA0" maxLength={2} keyboardType="number-pad" value={day} onChangeText={setDay} /></View>
+              <View style={[styles.inputBox, styles.flex1, { marginRight: 8 }]}><TextInput style={styles.input} placeholder="MM" placeholderTextColor="#8E8EA0" maxLength={2} keyboardType="number-pad" value={month} onChangeText={setMonth} /></View>
+              <View style={[styles.inputBox, styles.flex2]}><TextInput style={styles.input} placeholder="YYYY" placeholderTextColor="#8E8EA0" maxLength={4} keyboardType="number-pad" value={year} onChangeText={setYear} /></View>
             </View>
-            {(day.length > 0 || month.length > 0 || year.length > 0) && !isValidDate(day, month, year) && (
-              <Text style={styles.errorText}>* Enter a valid calendar date (Min. age 13)</Text>
-            )}
+            {(day.length > 0 || month.length > 0 || year.length > 0) && !isValidDate(day, month, year) && <Text style={styles.errorText}>* Enter a valid calendar date (Min. age 13)</Text>}
 
-            <TouchableOpacity style={styles.inputBox} onPress={() => setShowGenderModal(true)}>
-              <Text style={[styles.input, { color: gender ? '#FFFFFF' : '#8E8EA0', paddingTop: 18 }]}>
-                {gender || 'Select Gender'} ▾
-              </Text>
+            <TouchableOpacity style={[styles.inputBox, { alignItems: 'center', paddingRight: 16 }]} onPress={() => setShowGenderModal(true)}>
+              <Text style={[styles.input, { color: gender ? '#FFFFFF' : '#8E8EA0' }]}>{gender || 'Select Gender'}</Text>
+              <Ionicons name="chevron-down" size={20} color="#8E8EA0" />
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={[styles.continueBtn, (!isStep2Valid || isSubmitting) && styles.disabledBtn]} 
-              disabled={!isStep2Valid || isSubmitting} 
-              onPress={executeSignUp}
-            >
+            <TouchableOpacity style={[styles.continueBtn, (!isStep2Valid || isSubmitting) && styles.disabledBtn]} disabled={!isStep2Valid || isSubmitting} onPress={executeSignUp}>
               <Text style={styles.continueText}>{isSubmitting ? 'Creating...' : 'Create Account'}</Text>
             </TouchableOpacity>
           </View>
@@ -189,7 +170,6 @@ export default function SignUp({ onBack }) {
             </View>
           </View>
         </Modal>
-
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -209,6 +189,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
   avatarContainer: { alignItems: 'center', marginBottom: 24 },
   avatarCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#14141C', borderWidth: 2, borderColor: '#22222E', justifyContent: 'center', alignItems: 'center' },
+  avatarImage: { width: 86, height: 86, borderRadius: 43 },
+  pencilBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#8A2BE2', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#000000' },
   continueBtn: { backgroundColor: '#FFFFFF', borderRadius: 28, paddingVertical: 16, alignItems: 'center', marginTop: 'auto', marginBottom: 20 },
   disabledBtn: { backgroundColor: '#333333', opacity: 0.5 },
   continueText: { color: '#000000', fontSize: 16, fontWeight: '700' },
