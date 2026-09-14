@@ -1,13 +1,24 @@
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword 
-} from "firebase/auth";
-import { auth } from "./firebaseConfig"; // Make sure this points to the file you just made
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore"; 
+import { auth, db } from "./firebaseConfig"; // Added 'db' for Firestore
 
-export const registerUser = async (email, password) => {
+export const registerEmailUser = async (email, password, profileData) => {
   try {
+    // 1. Create the account
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    return { user: userCredential.user, error: null };
+    const user = userCredential.user;
+
+    // 2. Save the profile data to Firestore
+    await setDoc(doc(db, 'users', user.uid), {
+      name: profileData.name,
+      username: profileData.username,
+      gender: profileData.gender,
+      dob: profileData.dob,
+      profileImageUri: profileData.profileImageUri,
+      createdAt: new Date().toISOString(),
+    });
+
+    return { user, error: null };
   } catch (error) {
     return { user: null, error: error.message };
   }
