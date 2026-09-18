@@ -1,58 +1,81 @@
+import { auth, db } from './firebaseConfig';
 import { 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword,
-  deleteUser,
-  sendEmailVerification
-} from "firebase/auth";
-import { doc, setDoc, collection, query, where, getDocs, serverTimestamp } from "firebase/firestore"; 
-import { auth, db } from "./firebaseConfig";
+  signInWithEmailAndPassword, 
+  sendEmailVerification, 
+  deleteUser 
+} from 'firebase/auth';
+import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 
 export const registerEmailUser = async (email, password, profileData) => {
+  let user = null;
+
   try {
-    // 1. Check Username Uniqueness
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('username', '==', profileData.username));
-    const querySnapshot = await getDocs(q);
+    // Moved inside try-catch to prevent fatal crashes if profileData is malformed
+    const cleanUsername = profileData.username.trim().toLowerCase();
     
-    if (!querySnapshot.empty) {
-      return { user: null, error: "Username is already taken. Please choose another." };
+    // 1. FAST UX PRE-CHECK
+    const usernameRef = doc(db, 'usernames', cleanUsername);
+    const usernameSnap = await getDoc(usernameRef);
+    if (usernameSnap.exists()) {
+      return { user: null, error: 'Username is already taken.' };
     }
 
-    // 2. Create the Firebase Auth Account
+    // 2. CREATE AUTH USER
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
+    user = userCredential.user;
 
-    // 3. Save Profile to Firestore (With strict rollback)
-    try {
-      await setDoc(doc(db, 'users', user.uid), {
-        name: profileData.name,
-        username: profileData.username,
-        gender: profileData.gender,
-        dob: profileData.dob,
-        profileImageUri: null, 
-        createdAt: serverTimestamp(), 
-      });
-    } catch (firestoreError) {
-      try {
-        await deleteUser(user);
-        return { user: null, error: "Failed to save profile. Account creation was safely rolled back." };
-      } catch (rollbackError) {
-        return { user: null, error: "Critical error: Profile failed to save and account rollback failed. Please contact support." };
+    // 3. ATOMIC FIRESTORE BATCH
+    const batch = writeBatch(db);
+    const userRef = doc(db, 'users', user.uid);
+    
+    // Strict schema matching firestore.rules
+    const userData = {
+      displayName: profileData.displayName.trim(),
+      username: cleanUsername,
+      gender: profileData.gender,
+      photoURL: null, 
+      bannerUrl: null,
+      bubleText: '',
+      bio: '',
+      createdAt: serverTimestamp(),
+      usernameLastChanged: null,
+      socialStats: {
+        friendsCount: 0,
+        followersCount: 0,
+        mutualFriends: 0,
+        mutualServers: 0,
+        serversJoined: 0
       }
-    }
+    };
 
-    // 4. Send Email Verification (Non-destructive)
+    batch.set(userRef, userData);
+    batch.set(usernameRef, { uid: user.uid });
+
+    // 4. COMMIT BATCH (Enforces rules atomically)
+    await batch.commit();
+
+    // 5. ISOLATED EMAIL VERIFICATION
     try {
       await sendEmailVerification(user);
     } catch (emailError) {
-      console.warn("Account created, but email verification failed to send:", emailError);
-      // We DO NOT rollback here. The account and database are perfectly valid.
+      console.warn('Email verification could not be sent immediately:', emailError);
     }
 
     return { user, error: null };
-
   } catch (error) {
-    return { user: null, error: error.message };
+    console.error('Registration Error:', error);
+    
+    // ROLLBACK: Delete auth account ONLY if Firestore batch or auth creation failed
+    if (user) {
+      try { 
+        await deleteUser(user); 
+      } catch (rollbackError) { 
+        console.error('Rollback failed:', rollbackError); 
+      }
+    }
+    
+    return { user: null, error: error.message || 'Failed to create account.' };
   }
 };
 
@@ -61,13 +84,17 @@ export const loginUser = async (email, password) => {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
     
-    // Pass a flag to the UI if the email isn't verified yet
-    if (!user.emailVerified) {
-      return { user, error: null, unverified: true };
-    }
-    
-    return { user, error: null, unverified: false };
+    return { 
+      user, 
+      error: null, 
+      unverified: !user.emailVerified 
+    };
   } catch (error) {
-    return { user: null, error: error.message };
+    console.error('Login Error:', error);
+    return { 
+      user: null, 
+      error: error.message || 'Failed to log in.', 
+      unverified: false 
+    };
   }
 };
