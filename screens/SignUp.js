@@ -16,10 +16,17 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { registerEmailUser } from '../authService';
+import { useDriveStore } from '../store';
 
 export default function SignUp({ onBack }) {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Google Drive connection
+  const {
+    isReady: isDriveReady,
+    connectDrive
+  } = useDriveStore();
 
   // Step 1
   const [email, setEmail] = useState('');
@@ -35,23 +42,26 @@ export default function SignUp({ onBack }) {
   const [year, setYear] = useState('');
   const [profileImage, setProfileImage] = useState(null);
 
-  // Validation Logic
-  const normalizedUsername = username.trim().toLowerCase();
+  // --------------------------------------------------
+  // VALIDATION
+  // --------------------------------------------------
 
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    email.trim()
-  );
+  const normalizedUsername =
+    username.trim().toLowerCase();
 
-  const hasNumber = /\d/.test(password);
+  const isEmail =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      email.trim()
+    );
 
-  // MUST match Firestore rules exactly:
-  // 3-15 characters
-  // lowercase letters
-  // numbers
-  // underscores only
-  const isUsernameValid = /^[a-z0-9_]{3,15}$/.test(
-    normalizedUsername
-  );
+  const hasNumber =
+    /\d/.test(password);
+
+  // MUST match Firestore rules
+  const isUsernameValid =
+    /^[a-z0-9_]{3,15}$/.test(
+      normalizedUsername
+    );
 
   const isValidDate = (d, m, y) => {
     const numD = parseInt(d, 10);
@@ -83,7 +93,8 @@ export default function SignUp({ onBack }) {
       parsedDate.getMonth() === numM - 1 &&
       parsedDate.getDate() === numD;
 
-    let age = today.getFullYear() - numY;
+    let age =
+      today.getFullYear() - numY;
 
     if (
       today.getMonth() < numM - 1 ||
@@ -95,7 +106,10 @@ export default function SignUp({ onBack }) {
       age--;
     }
 
-    return isRealDate && age >= 13;
+    return (
+      isRealDate &&
+      age >= 13
+    );
   };
 
   const isStep1Valid =
@@ -104,13 +118,25 @@ export default function SignUp({ onBack }) {
     hasNumber;
 
   const isStep2Valid =
+    profileImage !== null &&
     name.trim().length > 0 &&
     isUsernameValid &&
-    isValidDate(day, month, year) &&
+    isValidDate(
+      day,
+      month,
+      year
+    ) &&
     gender !== '';
 
-  // Avatar picker
+  // --------------------------------------------------
+  // AVATAR PICKER
+  // --------------------------------------------------
+
   const handleAvatarPress = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
     try {
       const result =
         await ImagePicker.launchImageLibraryAsync({
@@ -125,9 +151,16 @@ export default function SignUp({ onBack }) {
         result.assets &&
         result.assets.length > 0
       ) {
-        setProfileImage(result.assets[0].uri);
+        setProfileImage(
+          result.assets[0].uri
+        );
       }
     } catch (err) {
+      console.error(
+        'Image picker error:',
+        err
+      );
+
       Alert.alert(
         'Error',
         'Unable to access gallery.'
@@ -135,51 +168,120 @@ export default function SignUp({ onBack }) {
     }
   };
 
-  // Create account
+  // --------------------------------------------------
+  // CREATE ACCOUNT
+  // --------------------------------------------------
+
   const executeSignUp = async () => {
     if (isSubmitting) {
+      return;
+    }
+
+    // Profile photo is required
+    if (!profileImage) {
+      Alert.alert(
+        'Profile Photo Required',
+        'Please select a profile photo before creating your account.'
+      );
+      return;
+    }
+
+    // Google Drive OAuth must be ready
+    if (!isDriveReady) {
+      Alert.alert(
+        'Google Drive Not Ready',
+        'Please wait a moment and try again.'
+      );
       return;
     }
 
     setIsSubmitting(true);
 
     try {
+      // ------------------------------------------------
+      // GOOGLE DRIVE PERMISSION
+      // ------------------------------------------------
+
+      const driveToken =
+        await connectDrive();
+
+      // User denied/cancelled Google permission
+      if (!driveToken) {
+        Alert.alert(
+          'Google Drive Permission Required',
+          'Shinzi requires Google Drive permission to continue creating your account.'
+        );
+
+        return;
+      }
+
+      // ------------------------------------------------
+      // CREATE FIREBASE ACCOUNT
+      // ------------------------------------------------
+
       const profileData = {
-        displayName: name.trim(),
-        username: normalizedUsername,
+        displayName:
+          name.trim(),
+
+        username:
+          normalizedUsername,
+
         gender,
-        dob: `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`,
-        profileImageUri: profileImage,
+
+        dob:
+          `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`,
+
+        // Local image URI for now.
+        // The actual Drive upload pipeline
+        // will be connected later.
+        profileImageUri:
+          profileImage,
       };
 
-      const { user, error } =
-        await registerEmailUser(
-          email.trim(),
-          password,
-          profileData
-        );
+      const {
+        user,
+        error
+      } = await registerEmailUser(
+        email.trim(),
+        password,
+        profileData
+      );
 
       if (error) {
         Alert.alert(
           'Sign Up Failed',
           error
         );
-      } else if (user) {
+
+        return;
+      }
+
+      if (user) {
         Alert.alert(
           'Account Created!',
           `Welcome to Shinzi Hub, ${profileData.displayName}! Please check your email inbox to verify your account.`
         );
-      } else {
-        Alert.alert(
-          'Sign Up Failed',
-          'Account creation did not complete. Please try again.'
-        );
+
+        return;
       }
+
+      Alert.alert(
+        'Sign Up Failed',
+        'Account creation did not complete. Please try again.'
+      );
+
     } catch (err) {
+      console.error(
+        'Signup error:',
+        err
+      );
+
       Alert.alert(
         'Error',
-        'An unexpected error occurred during signup.'
+        err?.message ||
+          'An unexpected error occurred during signup.'
       );
+
     } finally {
       setIsSubmitting(false);
     }
@@ -197,6 +299,7 @@ export default function SignUp({ onBack }) {
             : 'height'
         }
       >
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -205,6 +308,7 @@ export default function SignUp({ onBack }) {
                 ? onBack()
                 : setStep(1)
             }
+            disabled={isSubmitting}
           >
             <Text style={styles.backText}>
               {'< Back'}
@@ -215,12 +319,17 @@ export default function SignUp({ onBack }) {
             STEP {step}/2
           </Text>
 
-          <View style={{ width: 50 }} />
+          <View
+            style={{
+              width: 50
+            }}
+          />
         </View>
 
         {/* STEP 1 */}
         {step === 1 && (
           <View style={styles.content}>
+
             <View style={styles.inputBox}>
               <TextInput
                 style={styles.input}
@@ -231,6 +340,7 @@ export default function SignUp({ onBack }) {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                editable={!isSubmitting}
               />
             </View>
 
@@ -244,6 +354,7 @@ export default function SignUp({ onBack }) {
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
+                editable={!isSubmitting}
               />
             </View>
 
@@ -260,19 +371,26 @@ export default function SignUp({ onBack }) {
                 !isStep1Valid &&
                   styles.disabledBtn
               ]}
-              disabled={!isStep1Valid}
-              onPress={() => setStep(2)}
+              disabled={
+                !isStep1Valid ||
+                isSubmitting
+              }
+              onPress={() =>
+                setStep(2)
+              }
             >
               <Text style={styles.continueText}>
                 Continue
               </Text>
             </TouchableOpacity>
+
           </View>
         )}
 
         {/* STEP 2 */}
         {step === 2 && (
           <View style={styles.content}>
+
             {/* Avatar */}
             <View style={styles.avatarContainer}>
               <TouchableOpacity
@@ -282,7 +400,9 @@ export default function SignUp({ onBack }) {
               >
                 {profileImage ? (
                   <Image
-                    source={{ uri: profileImage }}
+                    source={{
+                      uri: profileImage
+                    }}
                     style={styles.avatarImage}
                   />
                 ) : (
@@ -301,6 +421,14 @@ export default function SignUp({ onBack }) {
                   />
                 </View>
               </TouchableOpacity>
+
+              {!profileImage && (
+                <Text
+                  style={styles.photoRequiredText}
+                >
+                  Profile photo required
+                </Text>
+              )}
             </View>
 
             {/* Display Name */}
@@ -313,6 +441,7 @@ export default function SignUp({ onBack }) {
                 onChangeText={setName}
                 maxLength={50}
                 autoCorrect={false}
+                editable={!isSubmitting}
               />
             </View>
 
@@ -334,24 +463,27 @@ export default function SignUp({ onBack }) {
                 autoCapitalize="none"
                 autoCorrect={false}
                 maxLength={15}
+                editable={!isSubmitting}
               />
             </View>
 
             {username.length > 0 &&
               !isUsernameValid && (
                 <Text style={styles.errorText}>
-                  * 3-15 characters, lowercase letters,
-                  numbers, and underscores only
+                  * 3-15 characters, lowercase letters, numbers, and underscores only
                 </Text>
               )}
 
             {/* Date of Birth */}
             <View style={styles.row}>
+
               <View
                 style={[
                   styles.inputBox,
                   styles.flex1,
-                  { marginRight: 8 }
+                  {
+                    marginRight: 8
+                  }
                 ]}
               >
                 <TextInput
@@ -362,6 +494,7 @@ export default function SignUp({ onBack }) {
                   keyboardType="number-pad"
                   value={day}
                   onChangeText={setDay}
+                  editable={!isSubmitting}
                 />
               </View>
 
@@ -369,7 +502,9 @@ export default function SignUp({ onBack }) {
                 style={[
                   styles.inputBox,
                   styles.flex1,
-                  { marginRight: 8 }
+                  {
+                    marginRight: 8
+                  }
                 ]}
               >
                 <TextInput
@@ -380,6 +515,7 @@ export default function SignUp({ onBack }) {
                   keyboardType="number-pad"
                   value={month}
                   onChangeText={setMonth}
+                  editable={!isSubmitting}
                 />
               </View>
 
@@ -397,14 +533,20 @@ export default function SignUp({ onBack }) {
                   keyboardType="number-pad"
                   value={year}
                   onChangeText={setYear}
+                  editable={!isSubmitting}
                 />
               </View>
+
             </View>
 
             {(day.length > 0 ||
               month.length > 0 ||
               year.length > 0) &&
-              !isValidDate(day, month, year) && (
+              !isValidDate(
+                day,
+                month,
+                year
+              ) && (
                 <Text style={styles.errorText}>
                   * Enter a valid calendar date (Min. age 13)
                 </Text>
@@ -434,7 +576,8 @@ export default function SignUp({ onBack }) {
                   }
                 ]}
               >
-                {gender || 'Select Gender'}
+                {gender ||
+                  'Select Gender'}
               </Text>
 
               <Ionicons
@@ -466,6 +609,7 @@ export default function SignUp({ onBack }) {
                   : 'Create Account'}
               </Text>
             </TouchableOpacity>
+
           </View>
         )}
 
@@ -480,6 +624,7 @@ export default function SignUp({ onBack }) {
         >
           <View style={styles.modalBg}>
             <View style={styles.modalContent}>
+
               {[
                 'Male',
                 'Female',
@@ -500,9 +645,11 @@ export default function SignUp({ onBack }) {
                   </Text>
                 </TouchableOpacity>
               ))}
+
             </View>
           </View>
         </Modal>
+
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -577,6 +724,12 @@ const styles = StyleSheet.create({
     marginTop: -8,
     marginBottom: 16,
     marginLeft: 4
+  },
+
+  photoRequiredText: {
+    color: '#FF3366',
+    fontSize: 12,
+    marginTop: 8
   },
 
   row: {
