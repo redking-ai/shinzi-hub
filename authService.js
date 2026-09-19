@@ -1,45 +1,144 @@
 import { auth, db } from './firebaseConfig';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  sendEmailVerification, 
-  deleteUser 
-} from 'firebase/auth';
-import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 
-export const registerEmailUser = async (email, password, profileData) => {
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  deleteUser
+} from 'firebase/auth';
+
+import {
+  doc,
+  getDoc,
+  writeBatch,
+  serverTimestamp
+} from 'firebase/firestore';
+
+export const registerEmailUser = async (
+  email,
+  password,
+  profileData
+) => {
   let user = null;
 
   try {
-    // Moved inside try-catch to prevent fatal crashes if profileData is malformed
-    const cleanUsername = profileData.username.trim().toLowerCase();
-    
-    // 1. FAST UX PRE-CHECK
-    const usernameRef = doc(db, 'usernames', cleanUsername);
-    const usernameSnap = await getDoc(usernameRef);
-    if (usernameSnap.exists()) {
-      return { user: null, error: 'Username is already taken.' };
+    // --------------------------------------------------
+    // VALIDATE PROFILE DATA
+    // --------------------------------------------------
+
+    if (!profileData) {
+      return {
+        user: null,
+        error: 'Profile information is missing.'
+      };
     }
 
-    // 2. CREATE AUTH USER
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    user = userCredential.user;
+    if (
+      !profileData.displayName ||
+      !profileData.username ||
+      !profileData.gender
+    ) {
+      return {
+        user: null,
+        error: 'Required profile information is missing.'
+      };
+    }
 
-    // 3. ATOMIC FIRESTORE BATCH
-    const batch = writeBatch(db);
-    const userRef = doc(db, 'users', user.uid);
-    
-    // Strict schema matching firestore.rules
+    // --------------------------------------------------
+    // NORMALIZE USERNAME
+    // --------------------------------------------------
+
+    const cleanUsername =
+      profileData.username
+        .trim()
+        .toLowerCase();
+
+    // --------------------------------------------------
+    // FAST USERNAME PRE-CHECK
+    // --------------------------------------------------
+
+    const usernameRef =
+      doc(
+        db,
+        'usernames',
+        cleanUsername
+      );
+
+    const usernameSnap =
+      await getDoc(usernameRef);
+
+    if (usernameSnap.exists()) {
+      return {
+        user: null,
+        error: 'Username is already taken.'
+      };
+    }
+
+    // --------------------------------------------------
+    // CREATE FIREBASE AUTH USER
+    // --------------------------------------------------
+
+    const userCredential =
+      await createUserWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
+    user =
+      userCredential.user;
+
+    // --------------------------------------------------
+    // CREATE FIRESTORE BATCH
+    // --------------------------------------------------
+
+    const batch =
+      writeBatch(db);
+
+    const userRef =
+      doc(
+        db,
+        'users',
+        user.uid
+      );
+
+    // --------------------------------------------------
+    // USER PROFILE DATA
+    // --------------------------------------------------
+
     const userData = {
-      displayName: profileData.displayName.trim(),
-      username: cleanUsername,
-      gender: profileData.gender,
-      photoURL: null, 
+      displayName:
+        profileData.displayName.trim(),
+
+      username:
+        cleanUsername,
+
+      gender:
+        profileData.gender,
+
+      // Profile image system
+      //
+      // This remains null until the real
+      // Google Drive upload / Shinzi asset
+      // system is implemented.
+      photoURL: null,
+
+      profileDriveFileId:
+        profileData.profileDriveFileId ||
+        null,
+
       bannerUrl: null,
+
       bubleText: '',
+
       bio: '',
-      createdAt: serverTimestamp(),
-      usernameLastChanged: null,
+
+      createdAt:
+        serverTimestamp(),
+
+      usernameLastChanged:
+        null,
+
       socialStats: {
         friendsCount: 0,
         followersCount: 0,
@@ -49,52 +148,121 @@ export const registerEmailUser = async (email, password, profileData) => {
       }
     };
 
-    batch.set(userRef, userData);
-    batch.set(usernameRef, { uid: user.uid });
+    // --------------------------------------------------
+    // FIRESTORE WRITES
+    // --------------------------------------------------
 
-    // 4. COMMIT BATCH (Enforces rules atomically)
+    batch.set(
+      userRef,
+      userData
+    );
+
+    batch.set(
+      usernameRef,
+      {
+        uid: user.uid
+      }
+    );
+
+    // --------------------------------------------------
+    // COMMIT
+    // --------------------------------------------------
+
     await batch.commit();
 
-    // 5. ISOLATED EMAIL VERIFICATION
+    // --------------------------------------------------
+    // EMAIL VERIFICATION
+    // --------------------------------------------------
+
     try {
-      await sendEmailVerification(user);
+      await sendEmailVerification(
+        user
+      );
     } catch (emailError) {
-      console.warn('Email verification could not be sent immediately:', emailError);
+      console.warn(
+        'Email verification could not be sent immediately:',
+        emailError
+      );
     }
 
-    return { user, error: null };
+    // --------------------------------------------------
+    // SUCCESS
+    // --------------------------------------------------
+
+    return {
+      user,
+      error: null
+    };
+
   } catch (error) {
-    console.error('Registration Error:', error);
-    
-    // ROLLBACK: Delete auth account ONLY if Firestore batch or auth creation failed
+    console.error(
+      'Registration Error:',
+      error
+    );
+
+    // --------------------------------------------------
+    // AUTH ROLLBACK
+    // --------------------------------------------------
+
     if (user) {
-      try { 
-        await deleteUser(user); 
-      } catch (rollbackError) { 
-        console.error('Rollback failed:', rollbackError); 
+      try {
+        await deleteUser(user);
+      } catch (rollbackError) {
+        console.error(
+          'Auth rollback failed:',
+          rollbackError
+        );
       }
     }
-    
-    return { user: null, error: error.message || 'Failed to create account.' };
+
+    return {
+      user: null,
+      error:
+        error?.message ||
+        'Failed to create account.'
+    };
   }
 };
 
-export const loginUser = async (email, password) => {
+// ------------------------------------------------------
+// LOGIN
+// ------------------------------------------------------
+
+export const loginUser = async (
+  email,
+  password
+) => {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    
-    return { 
-      user, 
-      error: null, 
-      unverified: !user.emailVerified 
+    const userCredential =
+      await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
+    const user =
+      userCredential.user;
+
+    return {
+      user,
+      error: null,
+      unverified:
+        !user.emailVerified
     };
+
   } catch (error) {
-    console.error('Login Error:', error);
-    return { 
-      user: null, 
-      error: error.message || 'Failed to log in.', 
-      unverified: false 
+    console.error(
+      'Login Error:',
+      error
+    );
+
+    return {
+      user: null,
+      error:
+        error?.message ||
+        'Failed to log in.',
+
+      unverified: false
     };
   }
 };
