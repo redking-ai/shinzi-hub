@@ -305,6 +305,7 @@ export const useDriveStore = () => {
         `${DRIVE_API}/files` +
         `?q=${encodeURIComponent(query)}` +
         `&spaces=drive` +
+        `&pageSize=1` +
         `&fields=files(id,name,mimeType,parents)`;
 
       const response =
@@ -463,19 +464,17 @@ export const useDriveStore = () => {
   // UPLOAD FILE
   // --------------------------------------------------
   //
-  // This uploads the actual local file.
-  //
-  // The process is:
+  // Uploads a real local file to Google Drive.
   //
   // local URI
   //    ↓
-  // Google Drive media upload
+  // binary upload
   //    ↓
   // real Drive file ID
   //    ↓
-  // rename + place inside Shinzi folder
+  // rename + organize
   //
-  // No fake file IDs are generated.
+  // No fake IDs are generated.
   // --------------------------------------------------
 
   const uploadFile = useCallback(
@@ -518,7 +517,7 @@ export const useDriveStore = () => {
           folderType
         );
 
-      // Read the local URI as binary data.
+      // Read local file.
       const localResponse =
         await fetch(localUri);
 
@@ -531,7 +530,13 @@ export const useDriveStore = () => {
       const fileBlob =
         await localResponse.blob();
 
-      // Upload the actual binary content.
+      if (!fileBlob) {
+        throw new Error(
+          'The selected file could not be converted into upload data.'
+        );
+      }
+
+      // Upload actual binary content.
       const uploadResponse =
         await fetch(
           `${DRIVE_UPLOAD_API}/files?uploadType=media&fields=id,name,mimeType,size,parents`,
@@ -561,17 +566,16 @@ export const useDriveStore = () => {
         );
       }
 
-      // ------------------------------------------------
-      // RENAME THE FILE AND MOVE IT INTO SHINZI
-      // ------------------------------------------------
-
+      // Organize and rename the real Drive file.
       const updateResponse =
         await fetch(
           `${DRIVE_API}/files/${encodeURIComponent(
             uploaded.id
-          )}?addParents=${encodeURIComponent(
+          )}` +
+          `?addParents=${encodeURIComponent(
             folder.id
-          )}&fields=id,name,mimeType,size,parents`,
+          )}` +
+          `&fields=id,name,mimeType,size,parents`,
           {
             method: 'PATCH',
 
@@ -617,6 +621,156 @@ export const useDriveStore = () => {
   );
 
   // --------------------------------------------------
+  // CREATE TEXT FILE
+  // --------------------------------------------------
+  //
+  // Used by Shinzi Text Holder.
+  //
+  // Example:
+  //
+  // assetId:
+  // shz-th60907
+  //
+  // Drive filename:
+  // shz-th60907.txt
+  //
+  // The actual text content is stored inside
+  // the user's Google Drive file.
+  //
+  // Default folder:
+  // /Shinzi/Others
+  // --------------------------------------------------
+
+  const createTextFile = useCallback(
+    async ({
+      text,
+      fileName,
+      folderType = 'others',
+    }) => {
+      if (
+        typeof text !== 'string'
+      ) {
+        throw new Error(
+          'Text content must be a string.'
+        );
+      }
+
+      if (!fileName) {
+        throw new Error(
+          'A file name is required.'
+        );
+      }
+
+      const token =
+        await getValidAccessToken();
+
+      if (!token) {
+        throw new Error(
+          'Google Drive is not connected.'
+        );
+      }
+
+      const folder =
+        await getShinziSubfolder(
+          token,
+          folderType
+        );
+
+      // Create a UTF-8 text Blob.
+      const textBlob =
+        new Blob(
+          [text],
+          {
+            type: 'text/plain; charset=utf-8',
+          }
+        );
+
+      // Upload actual text content.
+      const uploadResponse =
+        await fetch(
+          `${DRIVE_UPLOAD_API}/files?uploadType=media&fields=id,name,mimeType,size,parents`,
+          {
+            method: 'POST',
+
+            headers: {
+              ...getAuthHeader(token),
+              'Content-Type':
+                'text/plain; charset=utf-8',
+            },
+
+            body: textBlob,
+          }
+        );
+
+      await throwDriveError(
+        uploadResponse,
+        'Unable to create text file in Google Drive.'
+      );
+
+      const uploaded =
+        await uploadResponse.json();
+
+      if (!uploaded?.id) {
+        throw new Error(
+          'Google Drive text upload completed without returning a file ID.'
+        );
+      }
+
+      // Rename and organize the text file.
+      const updateResponse =
+        await fetch(
+          `${DRIVE_API}/files/${encodeURIComponent(
+            uploaded.id
+          )}` +
+          `?addParents=${encodeURIComponent(
+            folder.id
+          )}` +
+          `&fields=id,name,mimeType,size,parents`,
+          {
+            method: 'PATCH',
+
+            headers: {
+              ...getAuthHeader(token),
+              'Content-Type':
+                'application/json',
+            },
+
+            body: JSON.stringify({
+              name: fileName,
+            }),
+          }
+        );
+
+      await throwDriveError(
+        updateResponse,
+        'Text file was created but could not be organized inside the Shinzi folder.'
+      );
+
+      const finalFile =
+        await updateResponse.json();
+
+      return {
+        fileId: finalFile.id,
+        folderId: folder.id,
+        fileName:
+          finalFile.name ||
+          fileName,
+        mimeType:
+          finalFile.mimeType ||
+          'text/plain',
+        sizeBytes:
+          finalFile.size
+            ? Number(finalFile.size)
+            : new Blob([text]).size,
+      };
+    },
+    [
+      getValidAccessToken,
+      getShinziSubfolder,
+    ]
+  );
+
+  // --------------------------------------------------
   // GET FILE METADATA
   // --------------------------------------------------
 
@@ -642,7 +796,8 @@ export const useDriveStore = () => {
           await fetch(
             `${DRIVE_API}/files/${encodeURIComponent(
               fileId
-            )}?fields=id,name,mimeType,size,parents,trashed`,
+            )}` +
+            `?fields=id,name,mimeType,size,parents,trashed`,
             {
               headers:
                 getAuthHeader(token),
@@ -688,6 +843,7 @@ export const useDriveStore = () => {
             )}`,
             {
               method: 'DELETE',
+
               headers:
                 getAuthHeader(token),
             }
@@ -728,6 +884,8 @@ export const useDriveStore = () => {
     getShinziSubfolder,
 
     uploadFile,
+
+    createTextFile,
 
     getFileMetadata,
 
