@@ -14,44 +14,98 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 
-export const registerEmailUser = async (
+
+// ============================================================
+// CREATE FIREBASE AUTH USER
+// ============================================================
+//
+// This function ONLY creates the Firebase Authentication user.
+//
+// It does NOT create the Firestore profile yet.
+//
+// This is intentional.
+//
+// New signup flow:
+//
+// Auth user
+//   ↓
+// UID
+//   ↓
+// Google Drive upload
+//   ↓
+// Shinzi asset record
+//   ↓
+// Firestore user profile
+//
+// ============================================================
+
+export const createEmailAuthUser = async (
   email,
   password,
-  profileData
+  username
 ) => {
-  let user = null;
-
   try {
     // --------------------------------------------------
-    // VALIDATE PROFILE DATA
+    // BASIC VALIDATION
     // --------------------------------------------------
 
-    if (!profileData) {
+    if (
+      typeof email !== 'string' ||
+      !email.trim()
+    ) {
       return {
         user: null,
-        error: 'Profile information is missing.'
+        error: 'Email is required.'
       };
     }
 
     if (
-      !profileData.displayName ||
-      !profileData.username ||
-      !profileData.gender
+      typeof password !== 'string' ||
+      !password
     ) {
       return {
         user: null,
-        error: 'Required profile information is missing.'
+        error: 'Password is required.'
       };
     }
+
+    if (
+      typeof username !== 'string' ||
+      !username.trim()
+    ) {
+      return {
+        user: null,
+        error: 'Username is required.'
+      };
+    }
+
 
     // --------------------------------------------------
     // NORMALIZE USERNAME
     // --------------------------------------------------
 
     const cleanUsername =
-      profileData.username
+      username
         .trim()
         .toLowerCase();
+
+
+    // --------------------------------------------------
+    // USERNAME FORMAT
+    // --------------------------------------------------
+
+    if (
+      !/^[a-z0-9_]{3,15}$/.test(
+        cleanUsername
+      )
+    ) {
+      return {
+        user: null,
+        error:
+          'Username must be 3–15 characters and contain only lowercase letters, numbers, and underscores.'
+      };
+    }
+
 
     // --------------------------------------------------
     // FAST USERNAME PRE-CHECK
@@ -74,6 +128,7 @@ export const registerEmailUser = async (
       };
     }
 
+
     // --------------------------------------------------
     // CREATE FIREBASE AUTH USER
     // --------------------------------------------------
@@ -85,15 +140,169 @@ export const registerEmailUser = async (
         password
       );
 
-    user =
+    const user =
       userCredential.user;
 
+
     // --------------------------------------------------
-    // CREATE FIRESTORE BATCH
+    // EMAIL VERIFICATION
     // --------------------------------------------------
 
-    const batch =
-      writeBatch(db);
+    try {
+      await sendEmailVerification(
+        user
+      );
+    } catch (emailError) {
+      // Email verification failure should NOT
+      // invalidate an otherwise successful account.
+      console.warn(
+        'Email verification could not be sent immediately:',
+        emailError
+      );
+    }
+
+
+    // --------------------------------------------------
+    // SUCCESS
+    // --------------------------------------------------
+
+    return {
+      user,
+      error: null
+    };
+
+  } catch (error) {
+    console.error(
+      'Auth User Creation Error:',
+      error
+    );
+
+    return {
+      user: null,
+      error:
+        error?.message ||
+        'Failed to create account.'
+    };
+  }
+};
+
+
+// ============================================================
+// CREATE FIRESTORE USER PROFILE
+// ============================================================
+//
+// IMPORTANT:
+//
+// This runs AFTER the Firebase Auth user exists.
+//
+// profileAssetId should contain the REAL Shinzi asset ID:
+//
+// shz-Ph12345
+//
+// The username reservation and user profile are committed
+// together in one Firestore batch.
+//
+// ============================================================
+
+export const createUserProfile = async (
+  user,
+  profileData
+) => {
+  try {
+
+    // --------------------------------------------------
+    // VALIDATE AUTH USER
+    // --------------------------------------------------
+
+    if (
+      !user ||
+      !user.uid
+    ) {
+      return {
+        success: false,
+        error: 'Authenticated user is required.'
+      };
+    }
+
+
+    // --------------------------------------------------
+    // VALIDATE PROFILE DATA
+    // --------------------------------------------------
+
+    if (!profileData) {
+      return {
+        success: false,
+        error: 'Profile information is missing.'
+      };
+    }
+
+
+    if (
+      !profileData.displayName ||
+      !profileData.username ||
+      !profileData.gender
+    ) {
+      return {
+        success: false,
+        error:
+          'Required profile information is missing.'
+      };
+    }
+
+
+    // --------------------------------------------------
+    // NORMALIZE USERNAME
+    // --------------------------------------------------
+
+    const cleanUsername =
+      profileData.username
+        .trim()
+        .toLowerCase();
+
+
+    // --------------------------------------------------
+    // VALIDATE USERNAME
+    // --------------------------------------------------
+
+    if (
+      !/^[a-z0-9_]{3,15}$/.test(
+        cleanUsername
+      )
+    ) {
+      return {
+        success: false,
+        error:
+          'Username must be 3–15 characters and contain only lowercase letters, numbers, and underscores.'
+      };
+    }
+
+
+    // --------------------------------------------------
+    // PROFILE ASSET VALIDATION
+    // --------------------------------------------------
+
+    if (
+      !profileData.profileAssetId ||
+      typeof profileData.profileAssetId !== 'string'
+    ) {
+      return {
+        success: false,
+        error:
+          'A valid profile asset ID is required.'
+      };
+    }
+
+
+    // --------------------------------------------------
+    // REFERENCES
+    // --------------------------------------------------
+
+    const usernameRef =
+      doc(
+        db,
+        'usernames',
+        cleanUsername
+      );
 
     const userRef =
       doc(
@@ -102,13 +311,40 @@ export const registerEmailUser = async (
         user.uid
       );
 
+
+    // --------------------------------------------------
+    // FINAL USERNAME CHECK
+    // --------------------------------------------------
+    //
+    // This protects against the normal race where
+    // two clients checked the username at the same
+    // time.
+    //
+    // Firestore security rules should ALSO enforce
+    // the reservation atomically.
+    //
+    // --------------------------------------------------
+
+    const usernameSnap =
+      await getDoc(usernameRef);
+
+    if (usernameSnap.exists()) {
+      return {
+        success: false,
+        error: 'Username is already taken.'
+      };
+    }
+
+
     // --------------------------------------------------
     // USER PROFILE DATA
     // --------------------------------------------------
 
     const userData = {
+
       displayName:
-        profileData.displayName.trim(),
+        profileData.displayName
+          .trim(),
 
       username:
         cleanUsername,
@@ -116,22 +352,30 @@ export const registerEmailUser = async (
       gender:
         profileData.gender,
 
-      // Profile image system
-      //
-      // This remains null until the real
-      // Google Drive upload / Shinzi asset
-      // system is implemented.
-      photoURL: null,
+      // ------------------------------------------------
+      // REAL SHINZI PROFILE ASSET
+      // ------------------------------------------------
 
-      profileDriveFileId:
-        profileData.profileDriveFileId ||
+      profileAssetId:
+        profileData.profileAssetId,
+
+      // Kept for compatibility with older UI/code.
+      // The actual profile image reference is now
+      // profileAssetId.
+      photoURL:
         null,
 
-      bannerUrl: null,
+      profileDriveFileId:
+        null,
 
-      bubleText: '',
+      bannerUrl:
+        null,
 
-      bio: '',
+      bubleText:
+        '',
+
+      bio:
+        '',
 
       createdAt:
         serverTimestamp(),
@@ -148,15 +392,23 @@ export const registerEmailUser = async (
       }
     };
 
+
     // --------------------------------------------------
-    // FIRESTORE WRITES
+    // FIRESTORE BATCH
     // --------------------------------------------------
 
+    const batch =
+      writeBatch(db);
+
+
+    // User profile
     batch.set(
       userRef,
       userData
     );
 
+
+    // Username reservation
     batch.set(
       usernameRef,
       {
@@ -164,75 +416,110 @@ export const registerEmailUser = async (
       }
     );
 
+
     // --------------------------------------------------
     // COMMIT
     // --------------------------------------------------
 
     await batch.commit();
 
-    // --------------------------------------------------
-    // EMAIL VERIFICATION
-    // --------------------------------------------------
-
-    try {
-      await sendEmailVerification(
-        user
-      );
-    } catch (emailError) {
-      console.warn(
-        'Email verification could not be sent immediately:',
-        emailError
-      );
-    }
 
     // --------------------------------------------------
     // SUCCESS
     // --------------------------------------------------
 
     return {
-      user,
+      success: true,
       error: null
     };
 
   } catch (error) {
+
     console.error(
-      'Registration Error:',
+      'User Profile Creation Error:',
       error
     );
 
-    // --------------------------------------------------
-    // AUTH ROLLBACK
-    // --------------------------------------------------
-
-    if (user) {
-      try {
-        await deleteUser(user);
-      } catch (rollbackError) {
-        console.error(
-          'Auth rollback failed:',
-          rollbackError
-        );
-      }
-    }
-
     return {
-      user: null,
+      success: false,
       error:
         error?.message ||
-        'Failed to create account.'
+        'Failed to create user profile.'
     };
   }
 };
 
-// ------------------------------------------------------
+
+// ============================================================
+// DELETE CURRENT AUTH USER
+// ============================================================
+//
+// Used for signup rollback.
+//
+// Example:
+//
+// Auth created
+// ↓
+// Drive upload fails
+// ↓
+// Delete Auth account
+//
+// This prevents an orphan Firebase Auth account.
+//
+// ============================================================
+
+export const deleteCurrentAuthUser = async (
+  user = auth.currentUser
+) => {
+  if (
+    !user ||
+    !user.uid
+  ) {
+    return {
+      success: false,
+      error: 'No authenticated user to delete.'
+    };
+  }
+
+  try {
+
+    await deleteUser(
+      user
+    );
+
+    return {
+      success: true,
+      error: null
+    };
+
+  } catch (error) {
+
+    console.error(
+      'Auth Rollback Error:',
+      error
+    );
+
+    return {
+      success: false,
+      error:
+        error?.message ||
+        'Failed to roll back account.'
+    };
+  }
+};
+
+
+// ============================================================
 // LOGIN
-// ------------------------------------------------------
+// ============================================================
 
 export const loginUser = async (
   email,
   password
 ) => {
+
   try {
+
     const userCredential =
       await signInWithEmailAndPassword(
         auth,
@@ -251,6 +538,7 @@ export const loginUser = async (
     };
 
   } catch (error) {
+
     console.error(
       'Login Error:',
       error
@@ -258,6 +546,7 @@ export const loginUser = async (
 
     return {
       user: null,
+
       error:
         error?.message ||
         'Failed to log in.',
