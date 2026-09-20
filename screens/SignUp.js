@@ -12,63 +12,119 @@ import {
   Alert,
   Image
 } from 'react-native';
+
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { registerEmailUser } from '../authService';
+
+import {
+  createEmailAuthUser,
+  createUserProfile,
+  deleteCurrentAuthUser
+} from '../authService';
+
 import { useDriveStore } from '../store';
 
+import {
+  generateAssetId,
+  createAssetRecord,
+  deleteAsset,
+  ASSET_TYPES,
+  ASSET_VISIBILITY
+} from '../assetService';
+
+
+// ============================================================
+// SIGN UP
+// ============================================================
+
 export default function SignUp({ onBack }) {
+
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Google Drive connection
+  // ----------------------------------------------------------
+  // GOOGLE DRIVE
+  // ----------------------------------------------------------
+
   const {
     isReady: isDriveReady,
-    connectDrive
+    connectDrive,
+    uploadFile,
+    deleteFile
   } = useDriveStore();
 
-  // Step 1
+
+  // ----------------------------------------------------------
+  // STEP 1
+  // ----------------------------------------------------------
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Step 2
+
+  // ----------------------------------------------------------
+  // STEP 2
+  // ----------------------------------------------------------
+
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [gender, setGender] = useState('');
   const [showGenderModal, setShowGenderModal] = useState(false);
+
   const [day, setDay] = useState('');
   const [month, setMonth] = useState('');
   const [year, setYear] = useState('');
+
   const [profileImage, setProfileImage] = useState(null);
 
-  // --------------------------------------------------
+
+  // ==========================================================
   // VALIDATION
-  // --------------------------------------------------
+  // ==========================================================
 
   const normalizedUsername =
     username.trim().toLowerCase();
+
 
   const isEmail =
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
       email.trim()
     );
 
+
   const hasNumber =
     /\d/.test(password);
 
-  // MUST match Firestore rules
+
   const isUsernameValid =
     /^[a-z0-9_]{3,15}$/.test(
       normalizedUsername
     );
 
-  const isValidDate = (d, m, y) => {
-    const numD = parseInt(d, 10);
-    const numM = parseInt(m, 10);
-    const numY = parseInt(y, 10);
 
-    const today = new Date();
+  // ----------------------------------------------------------
+  // DATE VALIDATION
+  // ----------------------------------------------------------
+
+  const isValidDate = (
+    d,
+    m,
+    y
+  ) => {
+
+    const numD =
+      parseInt(d, 10);
+
+    const numM =
+      parseInt(m, 10);
+
+    const numY =
+      parseInt(y, 10);
+
+    const today =
+      new Date();
+
 
     if (
       !numD ||
@@ -82,19 +138,24 @@ export default function SignUp({ onBack }) {
       return false;
     }
 
-    const parsedDate = new Date(
-      numY,
-      numM - 1,
-      numD
-    );
+
+    const parsedDate =
+      new Date(
+        numY,
+        numM - 1,
+        numD
+      );
+
 
     const isRealDate =
       parsedDate.getFullYear() === numY &&
       parsedDate.getMonth() === numM - 1 &&
       parsedDate.getDate() === numD;
 
+
     let age =
       today.getFullYear() - numY;
+
 
     if (
       today.getMonth() < numM - 1 ||
@@ -106,16 +167,19 @@ export default function SignUp({ onBack }) {
       age--;
     }
 
+
     return (
       isRealDate &&
       age >= 13
     );
   };
 
+
   const isStep1Valid =
     isEmail &&
     password.length >= 6 &&
     hasNumber;
+
 
   const isStep2Valid =
     profileImage !== null &&
@@ -128,34 +192,42 @@ export default function SignUp({ onBack }) {
     ) &&
     gender !== '';
 
-  // --------------------------------------------------
+
+  // ==========================================================
   // AVATAR PICKER
-  // --------------------------------------------------
+  // ==========================================================
 
   const handleAvatarPress = async () => {
+
     if (isSubmitting) {
       return;
     }
 
+
     try {
+
       const result =
         await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
-          quality: 0.8,
+          quality: 0.8
         });
+
 
       if (
         !result.canceled &&
         result.assets &&
         result.assets.length > 0
       ) {
+
         setProfileImage(
-          result.assets[0].uri
+          result.assets[0]
         );
       }
+
     } catch (err) {
+
       console.error(
         'Image picker error:',
         err
@@ -168,45 +240,146 @@ export default function SignUp({ onBack }) {
     }
   };
 
-  // --------------------------------------------------
+
+  // ==========================================================
+  // GET IMAGE INFORMATION
+  // ==========================================================
+
+  const getImageUploadInfo = (
+    imageAsset,
+    assetId
+  ) => {
+
+    const mimeType =
+      imageAsset?.mimeType ||
+      'image/jpeg';
+
+
+    let extension =
+      'jpg';
+
+
+    if (
+      mimeType === 'image/png'
+    ) {
+      extension = 'png';
+
+    } else if (
+      mimeType === 'image/webp'
+    ) {
+      extension = 'webp';
+
+    } else if (
+      mimeType === 'image/heic'
+    ) {
+      extension = 'heic';
+
+    } else if (
+      mimeType === 'image/heif'
+    ) {
+      extension = 'heif';
+
+    } else {
+
+      const uri =
+        imageAsset?.uri || '';
+
+      const cleanUri =
+        uri.split('?')[0];
+
+      const uriExtension =
+        cleanUri
+          .split('.')
+          .pop()
+          ?.toLowerCase();
+
+
+      if (
+        uriExtension &&
+        /^[a-z0-9]{2,5}$/.test(
+          uriExtension
+        )
+      ) {
+        extension =
+          uriExtension;
+      }
+    }
+
+
+    return {
+      fileName:
+        `${assetId}.${extension}`,
+
+      mimeType
+    };
+  };
+
+
+  // ==========================================================
   // CREATE ACCOUNT
-  // --------------------------------------------------
+  // ==========================================================
 
   const executeSignUp = async () => {
+
     if (isSubmitting) {
       return;
     }
 
-    // Profile photo is required
+
+    // --------------------------------------------------------
+    // PROFILE PHOTO REQUIRED
+    // --------------------------------------------------------
+
     if (!profileImage) {
+
       Alert.alert(
         'Profile Photo Required',
         'Please select a profile photo before creating your account.'
       );
+
       return;
     }
 
-    // Google Drive OAuth must be ready
+
+    // --------------------------------------------------------
+    // DRIVE MUST BE READY
+    // --------------------------------------------------------
+
     if (!isDriveReady) {
+
       Alert.alert(
         'Google Drive Not Ready',
         'Please wait a moment and try again.'
       );
+
       return;
     }
 
+
     setIsSubmitting(true);
 
+
+    // --------------------------------------------------------
+    // ROLLBACK TRACKING
+    // --------------------------------------------------------
+
+    let createdAuthUser = null;
+    let createdAssetId = null;
+    let uploadedDriveFileId = null;
+
+
     try {
-      // ------------------------------------------------
-      // GOOGLE DRIVE PERMISSION
-      // ------------------------------------------------
+
+      // ======================================================
+      // 1. GOOGLE DRIVE PERMISSION
+      // ======================================================
 
       const driveToken =
         await connectDrive();
 
-      // User denied/cancelled Google permission
+
       if (!driveToken) {
+
         Alert.alert(
           'Google Drive Permission Required',
           'Shinzi requires Google Drive permission to continue creating your account.'
@@ -215,80 +388,314 @@ export default function SignUp({ onBack }) {
         return;
       }
 
-      // ------------------------------------------------
-      // CREATE FIREBASE ACCOUNT
-      // ------------------------------------------------
 
-      const profileData = {
-        displayName:
-          name.trim(),
+      // ======================================================
+      // 2. CREATE FIREBASE AUTH USER
+      // ======================================================
 
-        username:
-          normalizedUsername,
+      const authResult =
+        await createEmailAuthUser(
+          email.trim(),
+          password,
+          normalizedUsername
+        );
 
-        gender,
 
-        dob:
-          `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`,
+      if (
+        authResult.error ||
+        !authResult.user
+      ) {
 
-        // Local image URI for now.
-        // The actual Drive upload pipeline
-        // will be connected later.
-        profileImageUri:
-          profileImage,
-      };
-
-      const {
-        user,
-        error
-      } = await registerEmailUser(
-        email.trim(),
-        password,
-        profileData
-      );
-
-      if (error) {
         Alert.alert(
           'Sign Up Failed',
-          error
+          authResult.error ||
+            'Unable to create your account.'
         );
 
         return;
       }
 
-      if (user) {
-        Alert.alert(
-          'Account Created!',
-          `Welcome to Shinzi Hub, ${profileData.displayName}! Please check your email inbox to verify your account.`
+
+      createdAuthUser =
+        authResult.user;
+
+
+      // ======================================================
+      // 3. GENERATE SHINZI PROFILE ASSET ID
+      // ======================================================
+
+      const profileAssetId =
+        await generateAssetId(
+          ASSET_TYPES.PROFILE_PHOTO
         );
 
-        return;
+
+      createdAssetId =
+        profileAssetId;
+
+
+      // Example:
+      //
+      // shz-Ph12345
+      //
+
+      // ======================================================
+      // 4. PREPARE DRIVE FILE
+      // ======================================================
+
+      const {
+        fileName,
+        mimeType
+      } =
+        getImageUploadInfo(
+          profileImage,
+          profileAssetId
+        );
+
+
+      // ======================================================
+      // 5. UPLOAD PROFILE PHOTO TO GOOGLE DRIVE
+      // ======================================================
+
+      const uploadResult =
+        await uploadFile({
+          localUri:
+            profileImage.uri,
+
+          fileName,
+
+          mimeType,
+
+          folderType:
+            'profiles'
+        });
+
+
+      if (
+        !uploadResult ||
+        !uploadResult.fileId ||
+        !uploadResult.folderId
+      ) {
+
+        throw new Error(
+          'Google Drive upload did not return a valid file.'
+        );
       }
+
+
+      uploadedDriveFileId =
+        uploadResult.fileId;
+
+
+      // ======================================================
+      // 6. CREATE FIREBASE ASSET RECORD
+      // ======================================================
+
+      const asset =
+        await createAssetRecord({
+
+          // IMPORTANT:
+          // Same ID used in Drive filename.
+          assetId:
+            profileAssetId,
+
+          ownerUid:
+            createdAuthUser.uid,
+
+          type:
+            ASSET_TYPES.PROFILE_PHOTO,
+
+          visibility:
+            ASSET_VISIBILITY.PUBLIC,
+
+          providerFileId:
+            uploadResult.fileId,
+
+          driveFolderId:
+            uploadResult.folderId,
+
+          fileName:
+            uploadResult.fileName ||
+            fileName,
+
+          mimeType:
+            uploadResult.mimeType ||
+            mimeType,
+
+          sizeBytes:
+            typeof uploadResult.sizeBytes === 'number'
+              ? uploadResult.sizeBytes
+              : 0,
+
+          version:
+            1,
+
+          status:
+            'active'
+        });
+
+
+      if (
+        !asset ||
+        asset.assetId !== profileAssetId
+      ) {
+
+        throw new Error(
+          'Profile asset record could not be created.'
+        );
+      }
+
+
+      // ======================================================
+      // 7. CREATE FIRESTORE USER PROFILE
+      // ======================================================
+
+      const profileResult =
+        await createUserProfile(
+          createdAuthUser,
+          {
+
+            displayName:
+              name.trim(),
+
+            username:
+              normalizedUsername,
+
+            gender,
+
+            dob:
+              `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`,
+
+            profileAssetId:
+              profileAssetId
+          }
+        );
+
+
+      if (
+        !profileResult.success
+      ) {
+
+        throw new Error(
+          profileResult.error ||
+          'Unable to create your Shinzi profile.'
+        );
+      }
+
+
+      // ======================================================
+      // 8. SUCCESS
+      // ======================================================
 
       Alert.alert(
-        'Sign Up Failed',
-        'Account creation did not complete. Please try again.'
+        'Account Created!',
+        `Welcome to Shinzi Hub, ${name.trim()}! Please check your email inbox to verify your account.`
       );
 
+
+      return;
+
     } catch (err) {
+
       console.error(
         'Signup error:',
         err
       );
 
+
+      // ======================================================
+      // ROLLBACK 1:
+      // DELETE FIRESTORE ASSET RECORD
+      // ======================================================
+
+      if (createdAssetId) {
+
+        try {
+
+          await deleteAsset(
+            createdAssetId
+          );
+
+        } catch (assetRollbackError) {
+
+          console.error(
+            'Asset metadata rollback failed:',
+            assetRollbackError
+          );
+        }
+      }
+
+
+      // ======================================================
+      // ROLLBACK 2:
+      // DELETE GOOGLE DRIVE FILE
+      // ======================================================
+
+      if (uploadedDriveFileId) {
+
+        try {
+
+          await deleteFile(
+            uploadedDriveFileId
+          );
+
+        } catch (driveRollbackError) {
+
+          console.error(
+            'Google Drive rollback failed:',
+            driveRollbackError
+          );
+        }
+      }
+
+
+      // ======================================================
+      // ROLLBACK 3:
+      // DELETE FIREBASE AUTH USER
+      // ======================================================
+
+      if (createdAuthUser) {
+
+        try {
+
+          await deleteCurrentAuthUser(
+            createdAuthUser
+          );
+
+        } catch (authRollbackError) {
+
+          console.error(
+            'Firebase Auth rollback failed:',
+            authRollbackError
+          );
+        }
+      }
+
+
+      // ======================================================
+      // SHOW ERROR
+      // ======================================================
+
       Alert.alert(
-        'Error',
+        'Sign Up Failed',
         err?.message ||
           'An unexpected error occurred during signup.'
       );
 
     } finally {
+
       setIsSubmitting(false);
     }
   };
 
+
+  // ==========================================================
+  // UI
+  // ==========================================================
+
   return (
     <SafeAreaView style={styles.container}>
+
       <StatusBar style="light" />
 
       <KeyboardAvoidingView
@@ -301,7 +708,9 @@ export default function SignUp({ onBack }) {
       >
 
         {/* Header */}
+
         <View style={styles.header}>
+
           <TouchableOpacity
             onPress={() =>
               step === 1
@@ -315,22 +724,31 @@ export default function SignUp({ onBack }) {
             </Text>
           </TouchableOpacity>
 
+
           <Text style={styles.stepText}>
             STEP {step}/2
           </Text>
+
 
           <View
             style={{
               width: 50
             }}
           />
+
         </View>
 
-        {/* STEP 1 */}
+
+        {/* ==================================================
+            STEP 1
+        ================================================== */}
+
         {step === 1 && (
+
           <View style={styles.content}>
 
             <View style={styles.inputBox}>
+
               <TextInput
                 style={styles.input}
                 placeholder="Email address"
@@ -342,9 +760,12 @@ export default function SignUp({ onBack }) {
                 autoCorrect={false}
                 editable={!isSubmitting}
               />
+
             </View>
 
+
             <View style={styles.inputBox}>
+
               <TextInput
                 style={styles.input}
                 placeholder="Password"
@@ -356,14 +777,19 @@ export default function SignUp({ onBack }) {
                 autoCorrect={false}
                 editable={!isSubmitting}
               />
+
             </View>
+
 
             {password.length > 0 &&
               !hasNumber && (
+
                 <Text style={styles.errorText}>
                   * Password must contain at least 1 number
                 </Text>
+
               )}
+
 
             <TouchableOpacity
               style={[
@@ -379,60 +805,85 @@ export default function SignUp({ onBack }) {
                 setStep(2)
               }
             >
+
               <Text style={styles.continueText}>
                 Continue
               </Text>
+
             </TouchableOpacity>
 
           </View>
         )}
 
-        {/* STEP 2 */}
+
+        {/* ==================================================
+            STEP 2
+        ================================================== */}
+
         {step === 2 && (
+
           <View style={styles.content}>
 
             {/* Avatar */}
+
             <View style={styles.avatarContainer}>
+
               <TouchableOpacity
                 style={styles.avatarCircle}
                 onPress={handleAvatarPress}
                 disabled={isSubmitting}
               >
+
                 {profileImage ? (
+
                   <Image
                     source={{
-                      uri: profileImage
+                      uri: profileImage.uri
                     }}
                     style={styles.avatarImage}
                   />
+
                 ) : (
+
                   <Ionicons
                     name="person"
                     size={40}
                     color="#FFFFFF"
                   />
+
                 )}
 
+
                 <View style={styles.pencilBadge}>
+
                   <Ionicons
                     name="pencil"
                     size={14}
                     color="#FFFFFF"
                   />
+
                 </View>
+
               </TouchableOpacity>
 
+
               {!profileImage && (
+
                 <Text
                   style={styles.photoRequiredText}
                 >
                   Profile photo required
                 </Text>
+
               )}
+
             </View>
 
+
             {/* Display Name */}
+
             <View style={styles.inputBox}>
+
               <TextInput
                 style={styles.input}
                 placeholder="Display Name"
@@ -443,9 +894,12 @@ export default function SignUp({ onBack }) {
                 autoCorrect={false}
                 editable={!isSubmitting}
               />
+
             </View>
 
+
             {/* Username */}
+
             <View
               style={[
                 styles.inputBox,
@@ -454,6 +908,7 @@ export default function SignUp({ onBack }) {
                   styles.errorBox
               ]}
             >
+
               <TextInput
                 style={styles.input}
                 placeholder="Username (3-15 chars)"
@@ -465,16 +920,22 @@ export default function SignUp({ onBack }) {
                 maxLength={15}
                 editable={!isSubmitting}
               />
+
             </View>
+
 
             {username.length > 0 &&
               !isUsernameValid && (
+
                 <Text style={styles.errorText}>
                   * 3-15 characters, lowercase letters, numbers, and underscores only
                 </Text>
+
               )}
 
+
             {/* Date of Birth */}
+
             <View style={styles.row}>
 
               <View
@@ -486,6 +947,7 @@ export default function SignUp({ onBack }) {
                   }
                 ]}
               >
+
                 <TextInput
                   style={styles.input}
                   placeholder="DD"
@@ -496,7 +958,9 @@ export default function SignUp({ onBack }) {
                   onChangeText={setDay}
                   editable={!isSubmitting}
                 />
+
               </View>
+
 
               <View
                 style={[
@@ -507,6 +971,7 @@ export default function SignUp({ onBack }) {
                   }
                 ]}
               >
+
                 <TextInput
                   style={styles.input}
                   placeholder="MM"
@@ -517,7 +982,9 @@ export default function SignUp({ onBack }) {
                   onChangeText={setMonth}
                   editable={!isSubmitting}
                 />
+
               </View>
+
 
               <View
                 style={[
@@ -525,6 +992,7 @@ export default function SignUp({ onBack }) {
                   styles.flex2
                 ]}
               >
+
                 <TextInput
                   style={styles.input}
                   placeholder="YYYY"
@@ -535,9 +1003,11 @@ export default function SignUp({ onBack }) {
                   onChangeText={setYear}
                   editable={!isSubmitting}
                 />
+
               </View>
 
             </View>
+
 
             {(day.length > 0 ||
               month.length > 0 ||
@@ -547,12 +1017,16 @@ export default function SignUp({ onBack }) {
                 month,
                 year
               ) && (
+
                 <Text style={styles.errorText}>
                   * Enter a valid calendar date (Min. age 13)
                 </Text>
+
               )}
 
+
             {/* Gender */}
+
             <TouchableOpacity
               style={[
                 styles.inputBox,
@@ -566,6 +1040,7 @@ export default function SignUp({ onBack }) {
               }
               disabled={isSubmitting}
             >
+
               <Text
                 style={[
                   styles.input,
@@ -580,14 +1055,18 @@ export default function SignUp({ onBack }) {
                   'Select Gender'}
               </Text>
 
+
               <Ionicons
                 name="chevron-down"
                 size={20}
                 color="#8E8EA0"
               />
+
             </TouchableOpacity>
 
+
             {/* Create Account */}
+
             <TouchableOpacity
               style={[
                 styles.continueBtn,
@@ -603,17 +1082,23 @@ export default function SignUp({ onBack }) {
               }
               onPress={executeSignUp}
             >
+
               <Text style={styles.continueText}>
                 {isSubmitting
                   ? 'Creating...'
                   : 'Create Account'}
               </Text>
+
             </TouchableOpacity>
 
           </View>
         )}
 
-        {/* Gender Modal */}
+
+        {/* ==================================================
+            GENDER MODAL
+        ================================================== */}
+
         <Modal
           visible={showGenderModal}
           transparent
@@ -622,7 +1107,9 @@ export default function SignUp({ onBack }) {
             setShowGenderModal(false)
           }
         >
+
           <View style={styles.modalBg}>
+
             <View style={styles.modalContent}>
 
               {[
@@ -630,6 +1117,7 @@ export default function SignUp({ onBack }) {
                 'Female',
                 'Others'
               ].map((g) => (
+
                 <TouchableOpacity
                   key={g}
                   style={styles.modalOption}
@@ -638,24 +1126,36 @@ export default function SignUp({ onBack }) {
                     setShowGenderModal(false);
                   }}
                 >
+
                   <Text
                     style={styles.modalOptionText}
                   >
                     {g}
                   </Text>
+
                 </TouchableOpacity>
+
               ))}
 
             </View>
+
           </View>
+
         </Modal>
 
       </KeyboardAvoidingView>
+
     </SafeAreaView>
   );
 }
 
+
+// ============================================================
+// STYLES
+// ============================================================
+
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     backgroundColor: '#000000'
@@ -816,4 +1316,5 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: 'center'
   }
+
 });
