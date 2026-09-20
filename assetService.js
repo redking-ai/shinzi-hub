@@ -20,10 +20,7 @@ import { db } from '../firebaseConfig';
 // - Validate asset types and visibility.
 // - Create/read/update/delete Firebase asset metadata.
 //
-// IMPORTANT:
-// This file does NOT upload files to Google Drive.
-//
-// Google Drive operations will be handled later by store.js.
+// Google Drive operations are handled by store.js.
 //
 // Flow:
 //
@@ -59,6 +56,10 @@ const MAX_ID_GENERATION_ATTEMPTS = 20;
 export const ASSET_TYPES = Object.freeze({
   PROFILE_PHOTO: 'profile_photo',
   BANNER: 'banner',
+
+  // Text Holder
+  TEXT_HOLDER: 'text_holder',
+
   SENT_PHOTO: 'sent_photo',
   SENT_VIDEO: 'sent_video',
   SENT_FILE: 'sent_file'
@@ -72,6 +73,10 @@ export const ASSET_TYPES = Object.freeze({
 const ASSET_PREFIXES = Object.freeze({
   [ASSET_TYPES.PROFILE_PHOTO]: 'Ph',
   [ASSET_TYPES.BANNER]: 'Bh',
+
+  // Text Holder
+  [ASSET_TYPES.TEXT_HOLDER]: 'th',
+
   [ASSET_TYPES.SENT_PHOTO]: 'SPh',
   [ASSET_TYPES.SENT_VIDEO]: 'SVh',
   [ASSET_TYPES.SENT_FILE]: 'SFh'
@@ -120,7 +125,10 @@ const isValidStatus = (status) => {
 
 
 const isValidNonEmptyString = (value) => {
-  return typeof value === 'string' && value.trim().length > 0;
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0
+  );
 };
 
 
@@ -132,7 +140,11 @@ const generateRandomFiveDigits = () => {
   const number =
     Math.floor(
       Math.random() *
-      (RANDOM_CODE_MAX - RANDOM_CODE_MIN + 1)
+      (
+        RANDOM_CODE_MAX -
+        RANDOM_CODE_MIN +
+        1
+      )
     ) + RANDOM_CODE_MIN;
 
   return String(number).padStart(5, '0');
@@ -150,33 +162,41 @@ const generateRandomFiveDigits = () => {
  *
  * shz-Ph09109
  * shz-Bh14589
+ * shz-th60907
  * shz-SPh91068
  * shz-SVh90018
  * shz-SFh98993
  */
 export const generateAssetId = async (type) => {
   if (!isValidAssetType(type)) {
-    throw new Error(`Invalid Shinzi asset type: ${type}`);
+    throw new Error(
+      `Invalid Shinzi asset type: ${type}`
+    );
   }
 
-  const prefix = ASSET_PREFIXES[type];
+  const prefix =
+    ASSET_PREFIXES[type];
 
   for (
     let attempt = 0;
     attempt < MAX_ID_GENERATION_ATTEMPTS;
     attempt += 1
   ) {
-    const randomDigits = generateRandomFiveDigits();
+    const randomDigits =
+      generateRandomFiveDigits();
 
-    const assetId = `shz-${prefix}${randomDigits}`;
+    const assetId =
+      `shz-${prefix}${randomDigits}`;
 
-    const assetRef = doc(
-      db,
-      ASSET_COLLECTION,
-      assetId
-    );
+    const assetRef =
+      doc(
+        db,
+        ASSET_COLLECTION,
+        assetId
+      );
 
-    const assetSnapshot = await getDoc(assetRef);
+    const assetSnapshot =
+      await getDoc(assetRef);
 
     if (!assetSnapshot.exists()) {
       return assetId;
@@ -198,20 +218,30 @@ export const generateAssetId = async (type) => {
  *
  * Example:
  *
- * getAsset('shz-Ph09109')
+ * getAsset('shz-th60907')
  */
-export const getAsset = async (assetId) => {
-  if (!isValidNonEmptyString(assetId)) {
-    throw new Error('A valid asset ID is required.');
+export const getAsset = async (
+  assetId
+) => {
+  if (
+    !isValidNonEmptyString(
+      assetId
+    )
+  ) {
+    throw new Error(
+      'A valid asset ID is required.'
+    );
   }
 
-  const assetRef = doc(
-    db,
-    ASSET_COLLECTION,
-    assetId.trim()
-  );
+  const assetRef =
+    doc(
+      db,
+      ASSET_COLLECTION,
+      assetId.trim()
+    );
 
-  const snapshot = await getDoc(assetRef);
+  const snapshot =
+    await getDoc(assetRef);
 
   if (!snapshot.exists()) {
     return null;
@@ -253,38 +283,70 @@ export const createAssetRecord = async ({
   // Basic validation
   // ------------------------------
 
-  if (!isValidNonEmptyString(ownerUid)) {
-    throw new Error('ownerUid is required.');
+  if (
+    !isValidNonEmptyString(
+      ownerUid
+    )
+  ) {
+    throw new Error(
+      'ownerUid is required.'
+    );
   }
 
   if (!isValidAssetType(type)) {
-    throw new Error(`Invalid Shinzi asset type: ${type}`);
+    throw new Error(
+      `Invalid Shinzi asset type: ${type}`
+    );
   }
 
-  if (!isValidVisibility(visibility)) {
+  if (
+    !isValidVisibility(
+      visibility
+    )
+  ) {
     throw new Error(
       `Invalid asset visibility: ${visibility}`
     );
   }
 
-  if (!isValidNonEmptyString(providerFileId)) {
+  if (
+    !isValidNonEmptyString(
+      providerFileId
+    )
+  ) {
     throw new Error(
       'A real Google Drive providerFileId is required.'
     );
   }
 
-  if (!isValidNonEmptyString(driveFolderId)) {
+  if (
+    !isValidNonEmptyString(
+      driveFolderId
+    )
+  ) {
     throw new Error(
       'A real Google Drive driveFolderId is required.'
     );
   }
 
-  if (!isValidNonEmptyString(fileName)) {
-    throw new Error('fileName is required.');
+  if (
+    !isValidNonEmptyString(
+      fileName
+    )
+  ) {
+    throw new Error(
+      'fileName is required.'
+    );
   }
 
-  if (!isValidNonEmptyString(mimeType)) {
-    throw new Error('mimeType is required.');
+  if (
+    !isValidNonEmptyString(
+      mimeType
+    )
+  ) {
+    throw new Error(
+      'mimeType is required.'
+    );
   }
 
   if (
@@ -308,7 +370,9 @@ export const createAssetRecord = async ({
   }
 
   if (!isValidStatus(status)) {
-    throw new Error(`Invalid asset status: ${status}`);
+    throw new Error(
+      `Invalid asset status: ${status}`
+    );
   }
 
 
@@ -316,18 +380,22 @@ export const createAssetRecord = async ({
   // Generate unique Shinzi ID
   // ------------------------------
 
-  const assetId = await generateAssetId(type);
+  const assetId =
+    await generateAssetId(
+      type
+    );
 
 
   // ------------------------------
   // Create Firestore reference
   // ------------------------------
 
-  const assetRef = doc(
-    db,
-    ASSET_COLLECTION,
-    assetId
-  );
+  const assetRef =
+    doc(
+      db,
+      ASSET_COLLECTION,
+      assetId
+    );
 
 
   // ------------------------------
@@ -335,21 +403,27 @@ export const createAssetRecord = async ({
   // ------------------------------
 
   const assetData = {
-    ownerUid: ownerUid.trim(),
+    ownerUid:
+      ownerUid.trim(),
 
     type,
 
     visibility,
 
-    provider: 'google_drive',
+    provider:
+      'google_drive',
 
-    providerFileId: providerFileId.trim(),
+    providerFileId:
+      providerFileId.trim(),
 
-    driveFolderId: driveFolderId.trim(),
+    driveFolderId:
+      driveFolderId.trim(),
 
-    fileName: fileName.trim(),
+    fileName:
+      fileName.trim(),
 
-    mimeType: mimeType.trim(),
+    mimeType:
+      mimeType.trim(),
 
     sizeBytes,
 
@@ -357,9 +431,11 @@ export const createAssetRecord = async ({
 
     status,
 
-    createdAt: serverTimestamp(),
+    createdAt:
+      serverTimestamp(),
 
-    updatedAt: serverTimestamp()
+    updatedAt:
+      serverTimestamp()
   };
 
 
@@ -394,25 +470,42 @@ export const updateAsset = async (
   updates
 ) => {
 
-  if (!isValidNonEmptyString(assetId)) {
-    throw new Error('A valid asset ID is required.');
+  if (
+    !isValidNonEmptyString(
+      assetId
+    )
+  ) {
+    throw new Error(
+      'A valid asset ID is required.'
+    );
   }
 
-  if (!updates || typeof updates !== 'object') {
-    throw new Error('Asset updates must be an object.');
+  if (
+    !updates ||
+    typeof updates !== 'object'
+  ) {
+    throw new Error(
+      'Asset updates must be an object.'
+    );
   }
 
 
-  // Prevent ownership/provider manipulation
-  // through this generic update function.
+  // Prevent ownership/provider manipulation.
 
   const forbiddenFields = [
     'ownerUid',
     'createdAt'
   ];
 
-  for (const field of forbiddenFields) {
-    if (Object.prototype.hasOwnProperty.call(updates, field)) {
+  for (
+    const field of forbiddenFields
+  ) {
+    if (
+      Object.prototype.hasOwnProperty.call(
+        updates,
+        field
+      )
+    ) {
       throw new Error(
         `${field} cannot be modified through updateAsset().`
       );
@@ -422,7 +515,9 @@ export const updateAsset = async (
 
   if (
     updates.visibility !== undefined &&
-    !isValidVisibility(updates.visibility)
+    !isValidVisibility(
+      updates.visibility
+    )
   ) {
     throw new Error(
       `Invalid asset visibility: ${updates.visibility}`
@@ -432,7 +527,9 @@ export const updateAsset = async (
 
   if (
     updates.status !== undefined &&
-    !isValidStatus(updates.status)
+    !isValidStatus(
+      updates.status
+    )
   ) {
     throw new Error(
       `Invalid asset status: ${updates.status}`
@@ -444,7 +541,9 @@ export const updateAsset = async (
     updates.version !== undefined &&
     (
       typeof updates.version !== 'number' ||
-      !Number.isInteger(updates.version) ||
+      !Number.isInteger(
+        updates.version
+      ) ||
       updates.version < 1
     )
   ) {
@@ -454,14 +553,16 @@ export const updateAsset = async (
   }
 
 
-  const assetRef = doc(
-    db,
-    ASSET_COLLECTION,
-    assetId.trim()
-  );
+  const assetRef =
+    doc(
+      db,
+      ASSET_COLLECTION,
+      assetId.trim()
+    );
 
 
-  const snapshot = await getDoc(assetRef);
+  const snapshot =
+    await getDoc(assetRef);
 
   if (!snapshot.exists()) {
     throw new Error(
@@ -474,12 +575,15 @@ export const updateAsset = async (
     assetRef,
     {
       ...updates,
-      updatedAt: serverTimestamp()
+      updatedAt:
+        serverTimestamp()
     }
   );
 
 
-  return getAsset(assetId);
+  return getAsset(
+    assetId
+  );
 };
 
 
@@ -491,32 +595,44 @@ export const updateAsset = async (
  * Deletes an asset metadata document.
  *
  * IMPORTANT:
- * This does NOT delete the Google Drive file yet.
+ * This does NOT delete the Google Drive file.
  *
- * Real Drive deletion will be connected later through store.js.
+ * Real Drive deletion is handled through store.js.
  */
-export const deleteAsset = async (assetId) => {
+export const deleteAsset = async (
+  assetId
+) => {
 
-  if (!isValidNonEmptyString(assetId)) {
-    throw new Error('A valid asset ID is required.');
+  if (
+    !isValidNonEmptyString(
+      assetId
+    )
+  ) {
+    throw new Error(
+      'A valid asset ID is required.'
+    );
   }
 
 
-  const assetRef = doc(
-    db,
-    ASSET_COLLECTION,
-    assetId.trim()
-  );
+  const assetRef =
+    doc(
+      db,
+      ASSET_COLLECTION,
+      assetId.trim()
+    );
 
 
-  const snapshot = await getDoc(assetRef);
+  const snapshot =
+    await getDoc(assetRef);
 
   if (!snapshot.exists()) {
     return false;
   }
 
 
-  await deleteDoc(assetRef);
+  await deleteDoc(
+    assetRef
+  );
 
   return true;
 };
@@ -526,8 +642,11 @@ export const deleteAsset = async (assetId) => {
 // EXPORT HELPERS
 // ============================================================
 
-export const isAssetType = isValidAssetType;
+export const isAssetType =
+  isValidAssetType;
 
-export const isAssetVisibility = isValidVisibility;
+export const isAssetVisibility =
+  isValidVisibility;
 
-export const isAssetStatus = isValidStatus;
+export const isAssetStatus =
+  isValidStatus;
