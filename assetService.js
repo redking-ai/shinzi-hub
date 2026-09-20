@@ -28,11 +28,15 @@ import { db } from '../firebaseConfig';
 //   ↓
 // assetService.js
 //   ↓
-// Firebase /assets/{assetId}
-//   ↓
 // store.js
 //   ↓
 // Google Drive
+//   ↓
+// real Drive file ID
+//   ↓
+// assetService.js
+//   ↓
+// Firebase /assets/{assetId}
 //
 // ============================================================
 
@@ -133,6 +137,59 @@ const isValidNonEmptyString = (value) => {
 
 
 // ============================================================
+// ASSET ID FORMAT
+// ============================================================
+
+const getAssetPrefix = (type) => {
+  if (!isValidAssetType(type)) {
+    throw new Error(
+      `Invalid Shinzi asset type: ${type}`
+    );
+  }
+
+  return ASSET_PREFIXES[type];
+};
+
+
+const isValidAssetIdForType = (
+  assetId,
+  type
+) => {
+  if (
+    !isValidNonEmptyString(assetId) ||
+    !isValidAssetType(type)
+  ) {
+    return false;
+  }
+
+  const prefix =
+    getAssetPrefix(type);
+
+  /*
+   * Exact format:
+   *
+   * shz-Ph12345
+   * shz-Bh12345
+   * shz-th12345
+   * shz-SPh12345
+   * shz-SVh12345
+   * shz-SFh12345
+   *
+   * Exactly 5 digits after the type prefix.
+   */
+
+  const pattern =
+    new RegExp(
+      `^shz-${prefix}\\d{5}$`
+    );
+
+  return pattern.test(
+    assetId.trim()
+  );
+};
+
+
+// ============================================================
 // RANDOM 5-DIGIT CODE
 // ============================================================
 
@@ -147,7 +204,10 @@ const generateRandomFiveDigits = () => {
       )
     ) + RANDOM_CODE_MIN;
 
-  return String(number).padStart(5, '0');
+  return String(number).padStart(
+    5,
+    '0'
+  );
 };
 
 
@@ -167,7 +227,9 @@ const generateRandomFiveDigits = () => {
  * shz-SVh90018
  * shz-SFh98993
  */
-export const generateAssetId = async (type) => {
+export const generateAssetId = async (
+  type
+) => {
   if (!isValidAssetType(type)) {
     throw new Error(
       `Invalid Shinzi asset type: ${type}`
@@ -175,7 +237,7 @@ export const generateAssetId = async (type) => {
   }
 
   const prefix =
-    ASSET_PREFIXES[type];
+    getAssetPrefix(type);
 
   for (
     let attempt = 0;
@@ -261,12 +323,32 @@ export const getAsset = async (
 /**
  * Creates a Firebase asset record.
  *
+ * `assetId` can be supplied when the caller needs
+ * to use the same Shinzi ID for the Google Drive
+ * filename BEFORE the Drive upload.
+ *
+ * Example:
+ *
+ * assetId:
+ *   shz-Ph12345
+ *
+ * Drive filename:
+ *   shz-Ph12345.jpg
+ *
+ * Firebase document:
+ *   /assets/shz-Ph12345
+ *
+ * If assetId is omitted, this function generates
+ * one automatically.
+ *
  * IMPORTANT:
- * This function requires a REAL Google Drive providerFileId.
+ * This function requires a REAL Google Drive
+ * providerFileId.
  *
  * It does NOT create fake Drive IDs.
  */
 export const createAssetRecord = async ({
+  assetId: providedAssetId = null,
   ownerUid,
   type,
   visibility,
@@ -340,9 +422,9 @@ export const createAssetRecord = async ({
   }
 
   if (
-    !isValidNonEmptyString(
+    isValidNonEmptyString(
       mimeType
-    )
+    ) === false
   ) {
     throw new Error(
       'mimeType is required.'
@@ -377,17 +459,40 @@ export const createAssetRecord = async ({
 
 
   // ------------------------------
-  // Generate unique Shinzi ID
+  // Determine asset ID
   // ------------------------------
 
-  const assetId =
-    await generateAssetId(
-      type
-    );
+  let assetId =
+    providedAssetId;
+
+  if (
+    assetId !== null &&
+    assetId !== undefined
+  ) {
+    if (
+      !isValidAssetIdForType(
+        assetId,
+        type
+      )
+    ) {
+      throw new Error(
+        `Asset ID "${assetId}" does not match asset type "${type}".`
+      );
+    }
+
+    assetId =
+      assetId.trim();
+
+  } else {
+    assetId =
+      await generateAssetId(
+        type
+      );
+  }
 
 
   // ------------------------------
-  // Create Firestore reference
+  // Firestore reference
   // ------------------------------
 
   const assetRef =
@@ -396,6 +501,20 @@ export const createAssetRecord = async ({
       ASSET_COLLECTION,
       assetId
     );
+
+
+  // ------------------------------
+  // Final collision check
+  // ------------------------------
+
+  const existingAsset =
+    await getDoc(assetRef);
+
+  if (existingAsset.exists()) {
+    throw new Error(
+      `Shinzi asset ID "${assetId}" already exists.`
+    );
+  }
 
 
   // ------------------------------
@@ -494,7 +613,10 @@ export const updateAsset = async (
 
   const forbiddenFields = [
     'ownerUid',
-    'createdAt'
+    'createdAt',
+    'provider',
+    'providerFileId',
+    'driveFolderId'
   ];
 
   for (
@@ -549,6 +671,46 @@ export const updateAsset = async (
   ) {
     throw new Error(
       'version must be a positive integer.'
+    );
+  }
+
+
+  if (
+    updates.sizeBytes !== undefined &&
+    (
+      typeof updates.sizeBytes !== 'number' ||
+      !Number.isFinite(
+        updates.sizeBytes
+      ) ||
+      updates.sizeBytes < 0
+    )
+  ) {
+    throw new Error(
+      'sizeBytes must be a valid non-negative number.'
+    );
+  }
+
+
+  if (
+    updates.fileName !== undefined &&
+    !isValidNonEmptyString(
+      updates.fileName
+    )
+  ) {
+    throw new Error(
+      'fileName must be a non-empty string.'
+    );
+  }
+
+
+  if (
+    updates.mimeType !== undefined &&
+    !isValidNonEmptyString(
+      updates.mimeType
+    )
+  ) {
+    throw new Error(
+      'mimeType must be a non-empty string.'
     );
   }
 
@@ -650,3 +812,6 @@ export const isAssetVisibility =
 
 export const isAssetStatus =
   isValidStatus;
+
+export const isAssetIdForType =
+  isValidAssetIdForType;
