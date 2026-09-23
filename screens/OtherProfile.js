@@ -1,4 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+} from 'react';
+
 import {
   StyleSheet,
   Text,
@@ -27,20 +31,51 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 
-export default function OtherProfile({ route, navigation }) {
+import { useDriveStore } from './store';
 
-  const targetUid = route?.params?.targetUid;
+export default function OtherProfile({
+  route,
+  navigation,
+}) {
 
-  const [loading, setLoading] = useState(true);
-  const [userData, setUserData] = useState(null);
+  const targetUid =
+    route?.params?.targetUid;
 
-  const [showMenu, setShowMenu] = useState(false);
-  const [activeTab, setActiveTab] = useState('Social');
+  const [loading, setLoading] =
+    useState(true);
+
+  const [userData, setUserData] =
+    useState(null);
+
+  // Asset image state
+  const [profileImageUri, setProfileImageUri] =
+    useState(null);
+
+  const [bannerImageUri, setBannerImageUri] =
+    useState(null);
+
+  const [assetLoading, setAssetLoading] =
+    useState(false);
+
+  const [showMenu, setShowMenu] =
+    useState(false);
+
+  const [activeTab, setActiveTab] =
+    useState('Social');
 
   // Moderation state
-  const [isFavourited, setIsFavourited] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isFavourited, setIsFavourited] =
+    useState(false);
+
+  const [isBlocked, setIsBlocked] =
+    useState(false);
+
+  const [isMuted, setIsMuted] =
+    useState(false);
+
+  const {
+    getFileDataUri,
+  } = useDriveStore();
 
 
   // ==========================================
@@ -50,8 +85,14 @@ export default function OtherProfile({ route, navigation }) {
   useEffect(() => {
 
     if (!targetUid) {
-      Alert.alert('Error', 'No user specified.');
+
+      Alert.alert(
+        'Error',
+        'No user specified.'
+      );
+
       navigation.goBack();
+
       return;
     }
 
@@ -63,7 +104,9 @@ export default function OtherProfile({ route, navigation }) {
       auth.currentUser &&
       targetUid === auth.currentUser.uid
     ) {
+
       navigation.replace('Profile');
+
       return;
     }
 
@@ -74,310 +117,556 @@ export default function OtherProfile({ route, navigation }) {
 
 
   // ==========================================
-  // FETCH TARGET USER
+  // LOAD DRIVE ASSET IMAGE
   // ==========================================
 
-  const fetchTargetProfile = async () => {
+  const loadAssetImage = async (
+    assetId
+  ) => {
+
+    if (!assetId) {
+      return null;
+    }
 
     try {
 
-      setLoading(true);
-
-      const userRef = doc(db, 'users', targetUid);
-      const docSnap = await getDoc(userRef);
-
-      if (docSnap.exists()) {
-
-        setUserData(docSnap.data());
-
-      } else {
-
-        Alert.alert(
-          'User Not Found',
-          'This profile does not exist.'
+      const assetRef =
+        doc(
+          db,
+          'assets',
+          assetId
         );
 
-        navigation.goBack();
+      const assetSnap =
+        await getDoc(assetRef);
+
+      if (!assetSnap.exists()) {
+
+        console.warn(
+          'Asset metadata not found:',
+          assetId
+        );
+
+        return null;
       }
+
+      const asset =
+        assetSnap.data();
+
+      // Make sure this is a Google Drive asset.
+      if (
+        asset?.provider !==
+        'google_drive'
+      ) {
+
+        console.warn(
+          'Unsupported asset provider:',
+          asset?.provider
+        );
+
+        return null;
+      }
+
+      // Do not load deleted/failed assets.
+      if (
+        asset?.status &&
+        asset.status !== 'active'
+      ) {
+
+        return null;
+      }
+
+      if (!asset?.providerFileId) {
+
+        console.warn(
+          'Asset has no Drive file ID:',
+          assetId
+        );
+
+        return null;
+      }
+
+      const dataUri =
+        await getFileDataUri(
+          asset.providerFileId
+        );
+
+      return dataUri;
 
     } catch (error) {
 
       console.error(
-        'Error fetching other profile:',
+        'Failed to load profile asset:',
         error
       );
 
-      Alert.alert(
-        'Error',
-        'Failed to load user profile.'
-      );
-
-    } finally {
-
-      setLoading(false);
+      return null;
     }
   };
+
+
+  // ==========================================
+  // LOAD PROFILE/BANNER ASSETS
+  // ==========================================
+
+  const loadProfileAssets =
+    async (data) => {
+
+      try {
+
+        setAssetLoading(true);
+
+        // -------------------------------
+        // PROFILE PHOTO
+        // -------------------------------
+
+        if (data?.profileAssetId) {
+
+          const imageUri =
+            await loadAssetImage(
+              data.profileAssetId
+            );
+
+          if (imageUri) {
+
+            setProfileImageUri(
+              imageUri
+            );
+
+          } else {
+
+            setProfileImageUri(null);
+          }
+
+        } else {
+
+          // Backward compatibility with
+          // older profiles.
+          setProfileImageUri(
+            data?.photoURL || null
+          );
+        }
+
+
+        // -------------------------------
+        // BANNER
+        // -------------------------------
+
+        if (data?.bannerAssetId) {
+
+          const imageUri =
+            await loadAssetImage(
+              data.bannerAssetId
+            );
+
+          if (imageUri) {
+
+            setBannerImageUri(
+              imageUri
+            );
+
+          } else {
+
+            setBannerImageUri(null);
+          }
+
+        } else {
+
+          // Backward compatibility with
+          // older profiles.
+          setBannerImageUri(
+            data?.bannerUrl || null
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Failed to load profile assets:',
+          error
+        );
+
+        // Fallback to legacy fields.
+        setProfileImageUri(
+          data?.photoURL || null
+        );
+
+        setBannerImageUri(
+          data?.bannerUrl || null
+        );
+
+      } finally {
+
+        setAssetLoading(false);
+      }
+    };
+
+
+  // ==========================================
+  // FETCH TARGET USER
+  // ==========================================
+
+  const fetchTargetProfile =
+    async () => {
+
+      try {
+
+        setLoading(true);
+
+        const userRef =
+          doc(
+            db,
+            'users',
+            targetUid
+          );
+
+        const docSnap =
+          await getDoc(userRef);
+
+        if (docSnap.exists()) {
+
+          const data =
+            docSnap.data();
+
+          setUserData(data);
+
+          // Load profile/banners from
+          // the new asset system.
+          await loadProfileAssets(
+            data
+          );
+
+        } else {
+
+          Alert.alert(
+            'User Not Found',
+            'This profile does not exist.'
+          );
+
+          navigation.goBack();
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Error fetching other profile:',
+          error
+        );
+
+        Alert.alert(
+          'Error',
+          'Failed to load user profile.'
+        );
+
+      } finally {
+
+        setLoading(false);
+      }
+    };
 
 
   // ==========================================
   // FETCH BLOCK / MUTE / FAVOURITE STATUS
   // ==========================================
 
-  const fetchRelationshipStatus = async () => {
+  const fetchRelationshipStatus =
+    async () => {
 
-    if (!auth.currentUser) return;
+      if (!auth.currentUser) {
+        return;
+      }
 
-    try {
+      try {
 
-      const currentUid = auth.currentUser.uid;
+        const currentUid =
+          auth.currentUser.uid;
 
-      const favSnap = await getDoc(
-        doc(
-          db,
-          'users',
-          currentUid,
-          'favourites',
-          targetUid
-        )
-      );
+        const favSnap =
+          await getDoc(
+            doc(
+              db,
+              'users',
+              currentUid,
+              'favourites',
+              targetUid
+            )
+          );
 
-      const blockSnap = await getDoc(
-        doc(
-          db,
-          'users',
-          currentUid,
-          'blocked',
-          targetUid
-        )
-      );
+        const blockSnap =
+          await getDoc(
+            doc(
+              db,
+              'users',
+              currentUid,
+              'blocked',
+              targetUid
+            )
+          );
 
-      const muteSnap = await getDoc(
-        doc(
-          db,
-          'users',
-          currentUid,
-          'muted',
-          targetUid
-        )
-      );
+        const muteSnap =
+          await getDoc(
+            doc(
+              db,
+              'users',
+              currentUid,
+              'muted',
+              targetUid
+            )
+          );
 
-      setIsFavourited(favSnap.exists());
-      setIsBlocked(blockSnap.exists());
-      setIsMuted(muteSnap.exists());
+        setIsFavourited(
+          favSnap.exists()
+        );
 
-    } catch (error) {
+        setIsBlocked(
+          blockSnap.exists()
+        );
 
-      console.error(
-        'Error fetching relationship statuses:',
-        error
-      );
-    }
-  };
+        setIsMuted(
+          muteSnap.exists()
+        );
+
+      } catch (error) {
+
+        console.error(
+          'Error fetching relationship statuses:',
+          error
+        );
+      }
+    };
 
 
   // ==========================================
   // BLOCK / UNBLOCK
   // ==========================================
 
-  const handleBlockUser = async () => {
+  const handleBlockUser =
+    async () => {
 
-    if (!auth.currentUser) return;
-
-    setShowMenu(false);
-
-    try {
-
-      const ref = doc(
-        db,
-        'users',
-        auth.currentUser.uid,
-        'blocked',
-        targetUid
-      );
-
-      if (isBlocked) {
-
-        await deleteDoc(ref);
-
-        setIsBlocked(false);
-
-        Alert.alert(
-          'Unblocked',
-          `@${userData?.username} has been unblocked.`
-        );
-
-      } else {
-
-        await setDoc(ref, {
-          blockedAt: serverTimestamp(),
-        });
-
-        setIsBlocked(true);
-
-        Alert.alert(
-          'Blocked',
-          `@${userData?.username} has been blocked.`
-        );
+      if (!auth.currentUser) {
+        return;
       }
 
-    } catch (error) {
+      setShowMenu(false);
 
-      console.error(
-        'Block action error:',
-        error
-      );
+      try {
 
-      Alert.alert(
-        'Error',
-        'Could not complete block action.'
-      );
-    }
-  };
+        const ref =
+          doc(
+            db,
+            'users',
+            auth.currentUser.uid,
+            'blocked',
+            targetUid
+          );
+
+        if (isBlocked) {
+
+          await deleteDoc(ref);
+
+          setIsBlocked(false);
+
+          Alert.alert(
+            'Unblocked',
+            `@${userData?.username} has been unblocked.`
+          );
+
+        } else {
+
+          await setDoc(
+            ref,
+            {
+              blockedAt:
+                serverTimestamp(),
+            }
+          );
+
+          setIsBlocked(true);
+
+          Alert.alert(
+            'Blocked',
+            `@${userData?.username} has been blocked.`
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Block action error:',
+          error
+        );
+
+        Alert.alert(
+          'Error',
+          'Could not complete block action.'
+        );
+      }
+    };
 
 
   // ==========================================
   // MUTE / UNMUTE
   // ==========================================
 
-  const handleMuteUser = async () => {
+  const handleMuteUser =
+    async () => {
 
-    if (!auth.currentUser) return;
-
-    setShowMenu(false);
-
-    try {
-
-      const ref = doc(
-        db,
-        'users',
-        auth.currentUser.uid,
-        'muted',
-        targetUid
-      );
-
-      if (isMuted) {
-
-        await deleteDoc(ref);
-
-        setIsMuted(false);
-
-        Alert.alert(
-          'Unmuted',
-          `@${userData?.username} has been unmuted.`
-        );
-
-      } else {
-
-        await setDoc(ref, {
-          mutedAt: serverTimestamp(),
-        });
-
-        setIsMuted(true);
-
-        Alert.alert(
-          'Muted',
-          `@${userData?.username} has been muted.`
-        );
+      if (!auth.currentUser) {
+        return;
       }
 
-    } catch (error) {
+      setShowMenu(false);
 
-      console.error(
-        'Mute action error:',
-        error
-      );
+      try {
 
-      Alert.alert(
-        'Error',
-        'Could not complete mute action.'
-      );
-    }
-  };
+        const ref =
+          doc(
+            db,
+            'users',
+            auth.currentUser.uid,
+            'muted',
+            targetUid
+          );
+
+        if (isMuted) {
+
+          await deleteDoc(ref);
+
+          setIsMuted(false);
+
+          Alert.alert(
+            'Unmuted',
+            `@${userData?.username} has been unmuted.`
+          );
+
+        } else {
+
+          await setDoc(
+            ref,
+            {
+              mutedAt:
+                serverTimestamp(),
+            }
+          );
+
+          setIsMuted(true);
+
+          Alert.alert(
+            'Muted',
+            `@${userData?.username} has been muted.`
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Mute action error:',
+          error
+        );
+
+        Alert.alert(
+          'Error',
+          'Could not complete mute action.'
+        );
+      }
+    };
 
 
   // ==========================================
   // FAVOURITE / UNFAVOURITE
   // ==========================================
 
-  const handleToggleFavourite = async () => {
+  const handleToggleFavourite =
+    async () => {
 
-    if (!auth.currentUser) return;
-
-    setShowMenu(false);
-
-    try {
-
-      const ref = doc(
-        db,
-        'users',
-        auth.currentUser.uid,
-        'favourites',
-        targetUid
-      );
-
-      if (isFavourited) {
-
-        await deleteDoc(ref);
-
-        setIsFavourited(false);
-
-        Alert.alert(
-          'Removed',
-          `@${userData?.username} removed from favourites.`
-        );
-
-      } else {
-
-        await setDoc(ref, {
-          addedAt: serverTimestamp(),
-        });
-
-        setIsFavourited(true);
-
-        Alert.alert(
-          'Saved',
-          `@${userData?.username} added to favourites.`
-        );
+      if (!auth.currentUser) {
+        return;
       }
 
-    } catch (error) {
+      setShowMenu(false);
 
-      console.error(
-        'Favourite action error:',
-        error
-      );
+      try {
 
-      Alert.alert(
-        'Error',
-        'Could not update favourites.'
-      );
-    }
-  };
+        const ref =
+          doc(
+            db,
+            'users',
+            auth.currentUser.uid,
+            'favourites',
+            targetUid
+          );
+
+        if (isFavourited) {
+
+          await deleteDoc(ref);
+
+          setIsFavourited(false);
+
+          Alert.alert(
+            'Removed',
+            `@${userData?.username} removed from favourites.`
+          );
+
+        } else {
+
+          await setDoc(
+            ref,
+            {
+              addedAt:
+                serverTimestamp(),
+            }
+          );
+
+          setIsFavourited(true);
+
+          Alert.alert(
+            'Saved',
+            `@${userData?.username} added to favourites.`
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Favourite action error:',
+          error
+        );
+
+        Alert.alert(
+          'Error',
+          'Could not update favourites.'
+        );
+      }
+    };
 
 
   // ==========================================
   // PRONOUNS
   // ==========================================
 
-  const getPronouns = (gender) => {
+  const getPronouns =
+    (gender) => {
 
-    if (gender === 'Male') {
-      return 'He/Him';
-    }
+      if (gender === 'Male') {
+        return 'He/Him';
+      }
 
-    if (gender === 'Female') {
-      return 'She/Her';
-    }
+      if (gender === 'Female') {
+        return 'She/Her';
+      }
 
-    return null;
-  };
+      return null;
+    };
 
 
   // ==========================================
   // LOADING
   // ==========================================
 
-  if (loading || !userData) {
+  if (
+    loading ||
+    !userData
+  ) {
 
     return (
       <View
@@ -386,10 +675,12 @@ export default function OtherProfile({ route, navigation }) {
           styles.centered,
         ]}
       >
+
         <ActivityIndicator
           size="large"
           color="#4DA8DA"
         />
+
       </View>
     );
   }
@@ -407,26 +698,34 @@ export default function OtherProfile({ route, navigation }) {
       <View style={styles.topBar}>
 
         <TouchableOpacity
-          onPress={() => navigation.goBack()}
+          onPress={() =>
+            navigation.goBack()
+          }
           style={styles.iconBtn}
         >
+
           <Ionicons
             name="arrow-back"
             size={24}
             color="#FFF"
           />
+
         </TouchableOpacity>
 
 
         <TouchableOpacity
-          onPress={() => setShowMenu(true)}
+          onPress={() =>
+            setShowMenu(true)
+          }
           style={styles.iconBtn}
         >
+
           <Ionicons
             name="ellipsis-vertical"
             size={24}
             color="#FFF"
           />
+
         </TouchableOpacity>
 
       </View>
@@ -438,13 +737,17 @@ export default function OtherProfile({ route, navigation }) {
         visible={showMenu}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowMenu(false)}
+        onRequestClose={() =>
+          setShowMenu(false)
+        }
       >
 
         <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
-          onPress={() => setShowMenu(false)}
+          onPress={() =>
+            setShowMenu(false)
+          }
         >
 
           <View style={styles.dropdownMenu}>
@@ -472,7 +775,9 @@ export default function OtherProfile({ route, navigation }) {
             </TouchableOpacity>
 
 
-            <View style={styles.divider} />
+            <View
+              style={styles.divider}
+            />
 
 
             {/* MUTE */}
@@ -482,7 +787,9 @@ export default function OtherProfile({ route, navigation }) {
               onPress={handleMuteUser}
             >
 
-              <Text style={styles.menuText}>
+              <Text
+                style={styles.menuText}
+              >
                 {isMuted
                   ? 'Unmute user'
                   : 'Mute user'}
@@ -491,14 +798,18 @@ export default function OtherProfile({ route, navigation }) {
             </TouchableOpacity>
 
 
-            <View style={styles.divider} />
+            <View
+              style={styles.divider}
+            />
 
 
             {/* FAVOURITE */}
 
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={handleToggleFavourite}
+              onPress={
+                handleToggleFavourite
+              }
             >
 
               <Text
@@ -529,17 +840,21 @@ export default function OtherProfile({ route, navigation }) {
 
         {/* BANNER + AVATAR */}
 
-        <View style={styles.headerContainer}>
+        <View
+          style={styles.headerContainer}
+        >
 
           <View style={styles.banner}>
 
-            {userData.bannerUrl ? (
+            {bannerImageUri ? (
 
               <Image
                 source={{
-                  uri: userData.bannerUrl,
+                  uri: bannerImageUri,
                 }}
-                style={StyleSheet.absoluteFillObject}
+                style={
+                  StyleSheet.absoluteFillObject
+                }
               />
 
             ) : (
@@ -548,7 +863,9 @@ export default function OtherProfile({ route, navigation }) {
                 name="triangle-outline"
                 size={80}
                 color="#333"
-                style={{ opacity: 0.5 }}
+                style={{
+                  opacity: 0.5,
+                }}
               />
 
             )}
@@ -556,15 +873,21 @@ export default function OtherProfile({ route, navigation }) {
           </View>
 
 
-          <View style={styles.avatarSection}>
+          <View
+            style={styles.avatarSection}
+          >
 
-            <View style={styles.avatarPlaceholder}>
+            <View
+              style={
+                styles.avatarPlaceholder
+              }
+            >
 
-              {userData.photoURL ? (
+              {profileImageUri ? (
 
                 <Image
                   source={{
-                    uri: userData.photoURL,
+                    uri: profileImageUri,
                   }}
                   style={styles.avatarImage}
                 />
@@ -584,9 +907,13 @@ export default function OtherProfile({ route, navigation }) {
 
             {userData.bubleText ? (
 
-              <View style={styles.buble}>
+              <View
+                style={styles.buble}
+              >
 
-                <Text style={styles.bubleText}>
+                <Text
+                  style={styles.bubleText}
+                >
                   {userData.bubleText}
                 </Text>
 
@@ -599,29 +926,44 @@ export default function OtherProfile({ route, navigation }) {
 
           {/* IDENTITY */}
 
-          <View style={styles.identityBlock}>
+          <View
+            style={styles.identityBlock}
+          >
 
-            <Text style={styles.displayName}>
+            <Text
+              style={styles.displayName}
+            >
               {userData.displayName}
             </Text>
 
-            <Text style={styles.username}>
+            <Text
+              style={styles.username}
+            >
               @{userData.username}
             </Text>
 
 
-            <View style={styles.badgesRow}>
+            <View
+              style={styles.badgesRow}
+            >
 
-              {getPronouns(userData.gender) && (
+              {getPronouns(
+                userData.gender
+              ) && (
 
-                <Text style={styles.pronoun}>
-                  {getPronouns(userData.gender)}
+                <Text
+                  style={styles.pronoun}
+                >
+                  {getPronouns(
+                    userData.gender
+                  )}
                 </Text>
 
               )}
 
 
-              {userData.gender === 'Male' && (
+              {userData.gender ===
+                'Male' && (
 
                 <MaterialCommunityIcons
                   name="gender-male"
@@ -632,7 +974,8 @@ export default function OtherProfile({ route, navigation }) {
               )}
 
 
-              {userData.gender === 'Female' && (
+              {userData.gender ===
+                'Female' && (
 
                 <MaterialCommunityIcons
                   name="gender-female"
@@ -651,13 +994,18 @@ export default function OtherProfile({ route, navigation }) {
 
         {/* TABS */}
 
-        <View style={styles.tabContainer}>
+        <View
+          style={styles.tabContainer}
+        >
 
           <TouchableOpacity
-            onPress={() => setActiveTab('Personal')}
+            onPress={() =>
+              setActiveTab('Personal')
+            }
             style={[
               styles.tab,
-              activeTab === 'Personal' &&
+              activeTab ===
+                'Personal' &&
                 styles.activeTab,
             ]}
           >
@@ -665,7 +1013,8 @@ export default function OtherProfile({ route, navigation }) {
             <Text
               style={[
                 styles.tabText,
-                activeTab === 'Personal' &&
+                activeTab ===
+                  'Personal' &&
                   styles.activeTabText,
               ]}
             >
@@ -676,10 +1025,13 @@ export default function OtherProfile({ route, navigation }) {
 
 
           <TouchableOpacity
-            onPress={() => setActiveTab('Social')}
+            onPress={() =>
+              setActiveTab('Social')
+            }
             style={[
               styles.tab,
-              activeTab === 'Social' &&
+              activeTab ===
+                'Social' &&
                 styles.activeTab,
             ]}
           >
@@ -687,7 +1039,8 @@ export default function OtherProfile({ route, navigation }) {
             <Text
               style={[
                 styles.tabText,
-                activeTab === 'Social' &&
+                activeTab ===
+                  'Social' &&
                   styles.activeTabText,
               ]}
             >
@@ -703,39 +1056,63 @@ export default function OtherProfile({ route, navigation }) {
 
         {activeTab === 'Social' ? (
 
-          <View style={styles.tabContent}>
+          <View
+            style={styles.tabContent}
+          >
 
-            <Text style={styles.sectionHeader}>
+            <Text
+              style={styles.sectionHeader}
+            >
               Network Stats
             </Text>
 
-            <Text style={styles.statLine}>
-              Friends: {
-                userData.socialStats?.friendsCount ?? 0
+            <Text
+              style={styles.statLine}
+            >
+              Friends:{' '}
+              {
+                userData.socialStats
+                  ?.friendsCount ?? 0
               }
             </Text>
 
-            <Text style={styles.statLine}>
-              Followers: {
-                userData.socialStats?.followersCount ?? 0
+            <Text
+              style={styles.statLine}
+            >
+              Followers:{' '}
+              {
+                userData.socialStats
+                  ?.followersCount ?? 0
               }
             </Text>
 
-            <Text style={styles.statLine}>
-              Mutual Friends: {
-                userData.socialStats?.mutualFriends ?? 0
+            <Text
+              style={styles.statLine}
+            >
+              Mutual Friends:{' '}
+              {
+                userData.socialStats
+                  ?.mutualFriends ?? 0
               }
             </Text>
 
-            <Text style={styles.statLine}>
-              Mutual Servers: {
-                userData.socialStats?.mutualServers ?? 0
+            <Text
+              style={styles.statLine}
+            >
+              Mutual Servers:{' '}
+              {
+                userData.socialStats
+                  ?.mutualServers ?? 0
               }
             </Text>
 
-            <Text style={styles.statLine}>
-              Servers Joined: {
-                userData.socialStats?.serversJoined ?? 0
+            <Text
+              style={styles.statLine}
+            >
+              Servers Joined:{' '}
+              {
+                userData.socialStats
+                  ?.serversJoined ?? 0
               }
             </Text>
 
@@ -745,35 +1122,48 @@ export default function OtherProfile({ route, navigation }) {
 
           /* PERSONAL */
 
-          <View style={styles.tabContent}>
+          <View
+            style={styles.tabContent}
+          >
 
-            <Text style={styles.sectionHeader}>
+            <Text
+              style={styles.sectionHeader}
+            >
               Bio 📄
             </Text>
 
-            <Text style={styles.bioTextBody}>
-              {userData.bio || 'No bio provided.'}
+            <Text
+              style={styles.bioTextBody}
+            >
+              {userData.bio ||
+                'No bio provided.'}
             </Text>
 
 
-            <Text style={styles.sectionHeader}>
+            <Text
+              style={styles.sectionHeader}
+            >
               Other Platforms
             </Text>
 
 
-            {userData.otherPlatforms?.length > 0 ? (
+            {userData.otherPlatforms
+              ?.length > 0 ? (
 
               userData.otherPlatforms.map(
                 (plat, index) => (
 
                   <Text
                     key={index}
-                    style={styles.platformItem}
+                    style={
+                      styles.platformItem
+                    }
                   >
 
                     <FontAwesome5
                       name={
-                        plat.iconName || 'link'
+                        plat.iconName ||
+                        'link'
                       }
                       size={14}
                       color="#FFF"
@@ -784,13 +1174,14 @@ export default function OtherProfile({ route, navigation }) {
                     {plat.handle}
 
                   </Text>
-
                 )
               )
 
             ) : (
 
-              <Text style={styles.emptyText}>
+              <Text
+                style={styles.emptyText}
+              >
                 No platforms connected
               </Text>
 
@@ -811,199 +1202,202 @@ export default function OtherProfile({ route, navigation }) {
 // STYLES
 // ==========================================
 
-const styles = StyleSheet.create({
+const styles =
+  StyleSheet.create({
 
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
+    container: {
+      flex: 1,
+      backgroundColor: '#121212',
+    },
 
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+    centered: {
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
 
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: 50,
-    backgroundColor: '#1A1A1A',
-  },
+    topBar: {
+      flexDirection: 'row',
+      justifyContent:
+        'space-between',
+      padding: 20,
+      paddingTop: 50,
+      backgroundColor: '#1A1A1A',
+    },
 
-  iconBtn: {
-    padding: 5,
-  },
+    iconBtn: {
+      padding: 5,
+    },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-  },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor:
+        'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-start',
+      alignItems: 'flex-end',
+    },
 
-  dropdownMenu: {
-    backgroundColor: '#2C2C2C',
-    borderRadius: 8,
-    marginTop: 90,
-    marginRight: 20,
-    width: 160,
-    elevation: 5,
-  },
+    dropdownMenu: {
+      backgroundColor: '#2C2C2C',
+      borderRadius: 8,
+      marginTop: 90,
+      marginRight: 20,
+      width: 160,
+      elevation: 5,
+    },
 
-  menuItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
+    menuItem: {
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+    },
 
-  menuText: {
-    color: '#FFF',
-    fontSize: 15,
-  },
+    menuText: {
+      color: '#FFF',
+      fontSize: 15,
+    },
 
-  divider: {
-    height: 1,
-    backgroundColor: '#3E3E3E',
-  },
+    divider: {
+      height: 1,
+      backgroundColor: '#3E3E3E',
+    },
 
-  headerContainer: {
-    paddingBottom: 20,
-  },
+    headerContainer: {
+      paddingBottom: 20,
+    },
 
-  banner: {
-    height: 120,
-    backgroundColor: '#2C2C2C',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+    banner: {
+      height: 120,
+      backgroundColor: '#2C2C2C',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
 
-  avatarSection: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: -40,
-    paddingHorizontal: 20,
-  },
+    avatarSection: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      marginTop: -40,
+      paddingHorizontal: 20,
+    },
 
-  avatarPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#444',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#121212',
-    overflow: 'hidden',
-  },
+    avatarPlaceholder: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: '#444',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 4,
+      borderColor: '#121212',
+      overflow: 'hidden',
+    },
 
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
+    avatarImage: {
+      width: '100%',
+      height: '100%',
+    },
 
-  buble: {
-    backgroundColor: '#333',
-    padding: 8,
-    borderRadius: 15,
-    marginLeft: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#555',
-  },
+    buble: {
+      backgroundColor: '#333',
+      padding: 8,
+      borderRadius: 15,
+      marginLeft: 10,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: '#555',
+    },
 
-  bubleText: {
-    color: '#FFF',
-    fontSize: 12,
-  },
+    bubleText: {
+      color: '#FFF',
+      fontSize: 12,
+    },
 
-  identityBlock: {
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
+    identityBlock: {
+      paddingHorizontal: 20,
+      marginTop: 10,
+    },
 
-  displayName: {
-    color: '#FFF',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
+    displayName: {
+      color: '#FFF',
+      fontSize: 24,
+      fontWeight: 'bold',
+    },
 
-  username: {
-    color: '#AAA',
-    fontSize: 14,
-    marginBottom: 5,
-  },
+    username: {
+      color: '#AAA',
+      fontSize: 14,
+      marginBottom: 5,
+    },
 
-  badgesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+    badgesRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
 
-  pronoun: {
-    color: '#AAA',
-    fontSize: 14,
-  },
+    pronoun: {
+      color: '#AAA',
+      fontSize: 14,
+    },
 
-  tabContainer: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
+    tabContainer: {
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+      borderBottomColor: '#333',
+    },
 
-  tab: {
-    flex: 1,
-    padding: 15,
-    alignItems: 'center',
-  },
+    tab: {
+      flex: 1,
+      padding: 15,
+      alignItems: 'center',
+    },
 
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#4DA8DA',
-  },
+    activeTab: {
+      borderBottomWidth: 2,
+      borderBottomColor: '#4DA8DA',
+    },
 
-  tabText: {
-    color: '#888',
-    fontSize: 16,
-  },
+    tabText: {
+      color: '#888',
+      fontSize: 16,
+    },
 
-  activeTabText: {
-    color: '#4DA8DA',
-    fontWeight: 'bold',
-  },
+    activeTabText: {
+      color: '#4DA8DA',
+      fontWeight: 'bold',
+    },
 
-  tabContent: {
-    padding: 20,
-  },
+    tabContent: {
+      padding: 20,
+    },
 
-  sectionHeader: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginTop: 15,
-    marginBottom: 10,
-  },
+    sectionHeader: {
+      color: '#FFF',
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginTop: 15,
+      marginBottom: 10,
+    },
 
-  bioTextBody: {
-    color: '#DDD',
-    fontSize: 14,
-    lineHeight: 20,
-  },
+    bioTextBody: {
+      color: '#DDD',
+      fontSize: 14,
+      lineHeight: 20,
+    },
 
-  platformItem: {
-    color: '#DDD',
-    fontSize: 14,
-    marginBottom: 8,
-  },
+    platformItem: {
+      color: '#DDD',
+      fontSize: 14,
+      marginBottom: 8,
+    },
 
-  emptyText: {
-    color: '#666',
-    fontStyle: 'italic',
-  },
+    emptyText: {
+      color: '#666',
+      fontStyle: 'italic',
+    },
 
-  statLine: {
-    color: '#DDD',
-    fontSize: 14,
-    marginBottom: 12,
-  },
+    statLine: {
+      color: '#DDD',
+      fontSize: 14,
+      marginBottom: 12,
+    },
 
-});
+  });
