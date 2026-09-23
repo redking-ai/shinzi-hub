@@ -815,6 +815,95 @@ export const useDriveStore = () => {
     );
 
   // --------------------------------------------------
+  // GET FILE DATA URI
+  // --------------------------------------------------
+  //
+  // Downloads a real Google Drive file and converts it
+  // into a data URI for React Native image rendering.
+  //
+  // Used by Profile.js for profile/banner images.
+  // --------------------------------------------------
+
+  const getFileDataUri =
+    useCallback(
+      async (fileId) => {
+        if (!fileId) {
+          throw new Error(
+            'A Google Drive file ID is required.'
+          );
+        }
+
+        const token =
+          await getValidAccessToken();
+
+        if (!token) {
+          throw new Error(
+            'Google Drive is not connected.'
+          );
+        }
+
+        const response =
+          await fetch(
+            `${DRIVE_API}/files/${encodeURIComponent(
+              fileId
+            )}?alt=media`,
+            {
+              headers:
+                getAuthHeader(token),
+            }
+          );
+
+        await throwDriveError(
+          response,
+          'Unable to download Google Drive file.'
+        );
+
+        const blob =
+          await response.blob();
+
+        if (!blob) {
+          throw new Error(
+            'Google Drive returned empty file data.'
+          );
+        }
+
+        return new Promise(
+          (resolve, reject) => {
+            const reader =
+              new FileReader();
+
+            reader.onloadend = () => {
+              if (
+                typeof reader.result !==
+                'string'
+              ) {
+                reject(
+                  new Error(
+                    'Unable to convert Drive file into image data.'
+                  )
+                );
+                return;
+              }
+
+              resolve(reader.result);
+            };
+
+            reader.onerror = () => {
+              reject(
+                new Error(
+                  'Failed to read downloaded Drive file.'
+                )
+              );
+            };
+
+            reader.readAsDataURL(blob);
+          }
+        );
+      },
+      [getValidAccessToken]
+    );
+
+  // --------------------------------------------------
   // DELETE FILE
   // --------------------------------------------------
 
@@ -888,6 +977,8 @@ export const useDriveStore = () => {
     createTextFile,
 
     getFileMetadata,
+
+    getFileDataUri,
 
     deleteFile,
   };
