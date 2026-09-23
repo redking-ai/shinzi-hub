@@ -434,11 +434,6 @@ export default function SignUp({ onBack }) {
         profileAssetId;
 
 
-      // Example:
-      //
-      // shz-Ph12345
-      //
-
       // ======================================================
       // 4. PREPARE DRIVE FILE
       // ======================================================
@@ -494,8 +489,6 @@ export default function SignUp({ onBack }) {
       const asset =
         await createAssetRecord({
 
-          // IMPORTANT:
-          // Same ID used in Drive filename.
           assetId:
             profileAssetId,
 
@@ -587,9 +580,35 @@ export default function SignUp({ onBack }) {
       // 8. SUCCESS
       // ======================================================
 
+      /*
+       * Firebase Auth has successfully created and signed in
+       * the user.
+       *
+       * App.js is listening with onAuthStateChanged().
+       *
+       * Once Firebase reports the authenticated user,
+       * App.js automatically replaces this SignUp screen
+       * with ChatScreen.js.
+       *
+       * We intentionally do NOT manually navigate here.
+       */
+
       Alert.alert(
         'Account Created!',
-        `Welcome to Shinzi Hub, ${name.trim()}! Please check your email inbox to verify your account.`
+        `Welcome to Shinzi Hub, ${name.trim()}!`,
+        [
+          {
+            text: 'Continue',
+            onPress: () => {
+              // No manual navigation needed.
+              // App.js handles the transition through
+              // Firebase authentication state.
+            }
+          }
+        ],
+        {
+          cancelable: false
+        }
       );
 
 
