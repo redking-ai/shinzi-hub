@@ -1,10 +1,4 @@
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,17 +14,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
 import { StatusBar } from 'expo-status-bar';
-
 import * as ImagePicker from 'expo-image-picker';
-
-import {
-  Ionicons,
-  Feather,
-  FontAwesome5,
-} from '@expo/vector-icons';
-
+import { Ionicons, Feather } from '@expo/vector-icons';
 import {
   addDoc,
   collection,
@@ -39,5390 +25,3541 @@ import {
   getDoc,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
-
 import { auth, db } from './firebaseConfig';
-
-/* =========================================================
-   SHINZI CHAT
-   =========================================================
-
-   REAL FIRESTORE SYSTEMS
-   ----------------------
-   - Conversations
-   - Direct messages
-   - DM requests
-   - Friend requests
-   - Friends
-   - Groups
-   - Favorites
-   - Urgent chats
-   - Mentions
-   - Read state
-   - Typing state
-   - Poll creation
-   - Poll voting
-   - Event creation
-   - Event joining
-
-   UI-READY SYSTEMS
-   ----------------
-   - GIF picker
-   - Sticker picker
-   - Server GIFs
-   - Server stickers
-   - Voice message UI
-   - Call UI
-   - Video-call UI
-
-   IMPORTANT
-   ----------
-   No fake successful upload/send is written for systems
-   whose backend/provider has not been connected yet.
-========================================================= */
-
-
-/* =========================================================
-   COLORS
-========================================================= */
 
 const COLORS = {
   background: '#000000',
-
   card: '#0D0D12',
   card2: '#12121A',
-
   border: '#22222E',
   borderLight: '#333344',
-
   text: '#FFFFFF',
   secondary: '#8E8EA0',
-
   blue: '#4DA8DA',
   blueBright: '#00D2FF',
-
   urgent: '#FF3366',
   green: '#43D17A',
   red: '#FF4D67',
-
   yellow: '#FFD166',
 };
 
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-const TABS = [
-  'All',
-  'Recent',
-  'Urgent',
-  'Favorite',
-  'Groups',
-];
-
-const DIRECT_CONVERSATION_PREFIX = 'dm_';
-
+const TABS = ['All', 'Recent', 'Urgent', 'Favorite', 'Groups'];
 const MAX_MESSAGE_LENGTH = 4000;
-
 const MAX_POLL_OPTIONS = 20;
+const DIRECT_PREFIX = 'dm_';
 
+const directId = (a, b) => `${DIRECT_PREFIX}${[a, b].sort().join('_')}`;
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
-const makeDirectConversationId = (
-  uid1,
-  uid2
-) => {
-  return (
-    DIRECT_CONVERSATION_PREFIX +
-    [uid1, uid2]
-      .sort()
-      .join('_')
-  );
-};
-
-
-const getInitials = (
-  name = ''
-) => {
-  const clean =
-    String(name).trim();
-
-  if (!clean) {
-    return '?';
-  }
-
-  const parts =
-    clean.split(/\s+/);
-
-  if (parts.length >= 2) {
-    return (
-      `${parts[0][0]}${parts[1][0]}`
-    ).toUpperCase();
-  }
-
-  return clean
-    .substring(0, 2)
-    .toUpperCase();
-};
-
-
-const timestampToMillis = (
-  timestamp
-) => {
-  if (!timestamp) {
-    return 0;
-  }
-
-  if (
-    typeof timestamp.toMillis ===
-    'function'
-  ) {
-    return timestamp.toMillis();
-  }
-
-  if (
-    timestamp instanceof Date
-  ) {
-    return timestamp.getTime();
-  }
-
-  if (
-    typeof timestamp ===
-    'number'
-  ) {
-    return timestamp;
-  }
-
+const millis = value => {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
   return 0;
 };
 
-
-const formatTime = (
-  timestamp
-) => {
-  const millis =
-    timestampToMillis(
-      timestamp
-    );
-
-  if (!millis) {
-    return '';
-  }
-
-  return new Date(
-    millis
-  ).toLocaleTimeString(
-    [],
-    {
-      hour: 'numeric',
-      minute: '2-digit',
-    }
-  );
+const initials = value => {
+  const s = String(value || '').trim();
+  if (!s) return '?';
+  const p = s.split(/\s+/);
+  return (p.length > 1 ? p[0][0] + p[1][0] : s.slice(0, 2)).toUpperCase();
 };
 
+const formatTime = value =>
+  millis(value)
+    ? new Date(millis(value)).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '';
 
-const getDayKey = (
-  timestamp
-) => {
-  const millis =
-    timestampToMillis(
-      timestamp
-    );
-
-  if (!millis) {
-    return '';
-  }
-
-  const date =
-    new Date(millis);
-
-  return [
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  ].join('-');
+const dayKey = value => {
+  if (!millis(value)) return '';
+  const d = new Date(millis(value));
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 };
 
+const dateLabel = value => {
+  if (!millis(value)) return '';
+  const d = new Date(millis(value));
+  const now = new Date();
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
 
-const getDateLabel = (
-  timestamp
-) => {
-  const millis =
-    timestampToMillis(
-      timestamp
-    );
+  if (dayKey(d) === dayKey(now)) return 'Today';
+  if (dayKey(d) === dayKey(y)) return 'Yesterday';
 
-  if (!millis) {
-    return '';
-  }
+  return d.toLocaleDateString([], {
+    day: 'numeric',
+    month: 'short',
+    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  });
+};
 
-  const date =
-    new Date(millis);
+const mention = (text, username) => {
+  if (!text || !username) return false;
 
-  const today =
-    new Date();
-
-  const yesterday =
-    new Date();
-
-  yesterday.setDate(
-    yesterday.getDate() - 1
+  const escaped = String(username).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&'
   );
 
-  if (
-    getDayKey(date) ===
-    getDayKey(today)
-  ) {
-    return 'Today';
-  }
-
-  if (
-    getDayKey(date) ===
-    getDayKey(yesterday)
-  ) {
-    return 'Yesterday';
-  }
-
-  return date.toLocaleDateString(
-    [],
-    {
-      day: 'numeric',
-      month: 'short',
-      year:
-        date.getFullYear() !==
-        today.getFullYear()
-          ? 'numeric'
-          : undefined,
-    }
-  );
+  return new RegExp(
+    `(^|\\s)@${escaped}(\\s|$|[.,!?])`,
+    'i'
+  ).test(text);
 };
 
-
-const containsMention = (
-  text,
-  username
-) => {
-  if (
-    !text ||
-    !username
-  ) {
-    return false;
-  }
-
-  const escaped =
-    String(username).replace(
-      /[.*+?^${}()|[\]\\]/g,
-      '\\$&'
-    );
-
-  const regex =
-    new RegExp(
-      `(^|\\s)@${escaped}(\\s|$|[.,!?])`,
-      'i'
-    );
-
-  return regex.test(text);
-};
-
-
-const getPollTotalVotes = (
-  poll
-) => {
-  if (
-    !poll ||
-    !poll.votes
-  ) {
-    return 0;
-  }
-
-  return Object.values(
-    poll.votes
-  ).reduce(
-    (total, optionVotes) =>
-      total +
-      (
-        typeof optionVotes ===
-        'number'
-          ? optionVotes
-          : 0
-      ),
+const pollTotal = poll =>
+  Object.values(poll?.votes || {}).reduce(
+    (sum, v) => sum + (typeof v === 'number' ? v : 0),
     0
   );
+
+const pollPercent = (poll, index) => {
+  const total = pollTotal(poll);
+
+  return total
+    ? Math.round(
+        (Number(poll?.votes?.[index] || 0) / total) * 100
+      )
+    : 0;
 };
 
-
-const getPollPercentage = (
-  poll,
-  optionIndex
-) => {
-  const total =
-    getPollTotalVotes(
-      poll
-    );
-
-  if (!total) {
-    return 0;
-  }
-
-  const votes =
-    Number(
-      poll?.votes?.[
-        optionIndex
-      ] || 0
-    );
-
-  return Math.round(
-    (
-      votes /
-      total
-    ) *
-      100
-  );
-};
-
-
-/* =========================================================
-   SMALL REUSABLE COMPONENTS
-========================================================= */
-
-function Avatar({
-  name,
-  group = false,
-  small = false,
-}) {
+function Avatar({ name, group = false, small = false }) {
   return (
-    <View
-      style={
-        small
-          ? styles.avatarSmall
-          : styles.avatar
-      }
-    >
+    <View style={small ? styles.avatarSmall : styles.avatar}>
       {group ? (
         <Ionicons
           name="people"
-          size={
-            small
-              ? 17
-              : 23
-          }
-          color={
-            COLORS.secondary
-          }
+          size={small ? 17 : 23}
+          color={COLORS.secondary}
         />
       ) : (
-        <Text
-          style={
-            small
-              ? styles.avatarSmallText
-              : styles.avatarText
-          }
-        >
-          {getInitials(name)}
+        <Text style={small ? styles.avatarSmallText : styles.avatarText}>
+          {initials(name)}
         </Text>
       )}
     </View>
   );
 }
 
-
-function Badge({
-  count,
-}) {
+function Badge({ count }) {
   return (
-    <View
-      style={
-        styles.badge
-      }
-    >
-      <Text
-        style={
-          styles.badgeText
-        }
-      >
-        {count > 9
-          ? '9+'
-          : count}
+    <View style={styles.badge}>
+      <Text style={styles.badgeText}>
+        {count > 9 ? '9+' : count}
       </Text>
     </View>
   );
 }
 
-
-/* =========================================================
-   MAIN COMPONENT
-========================================================= */
-
-export default function ChatScreen({
-  onNavigate,
+function EmptyState({
+  icon = 'chatbubble-outline',
+  title,
+  text,
 }) {
-  const currentUser =
-    auth.currentUser;
-
-
-  /* =======================================================
-     MAIN STATE
-  ======================================================= */
-
-  const [
-    currentProfile,
-    setCurrentProfile,
-  ] = useState(null);
-
-  const [
-    conversations,
-    setConversations,
-  ] = useState([]);
-
-  const [
-    friends,
-    setFriends,
-  ] = useState([]);
-
-  const [
-    friendRequests,
-    setFriendRequests,
-  ] = useState([]);
-
-  const [
-    dmRequests,
-    setDmRequests,
-  ] = useState([]);
-
-
-  /* =======================================================
-     NAVIGATION STATE
-  ======================================================= */
-
-  const [
-    screen,
-    setScreen,
-  ] = useState('main');
-
-  const [
-    activeTab,
-    setActiveTab,
-  ] = useState('All');
-
-
-  /* =======================================================
-     SEARCH
-  ======================================================= */
-
-  const [
-    searchQuery,
-    setSearchQuery,
-  ] = useState('');
-
-  const [
-    searchResult,
-    setSearchResult,
-  ] = useState(null);
-
-  const [
-    searching,
-    setSearching,
-  ] = useState(false);
-
-
-  /* =======================================================
-     CONVERSATION STATE
-  ======================================================= */
-
-  const [
-    selectedConversation,
-    setSelectedConversation,
-  ] = useState(null);
-
-  const [
-    messages,
-    setMessages,
-  ] = useState([]);
-
-  const [
-    messageText,
-    setMessageText,
-  ] = useState('');
-
-  const [
-    sendingMessage,
-    setSendingMessage,
-  ] = useState(false);
-
-
-  /* =======================================================
-     LOADING
-  ======================================================= */
-
-  const [
-    loadingConversations,
-    setLoadingConversations,
-  ] = useState(true);
-
-  const [
-    loadingFriends,
-    setLoadingFriends,
-  ] = useState(true);
-
-
-  /* =======================================================
-     TYPING
-  ======================================================= */
-
-  const [
-    typingUsers,
-    setTypingUsers,
-  ] = useState({});
-
-  const typingTimeoutRef =
-    useRef(null);
-
-
-  /* =======================================================
-     MODALS
-  ======================================================= */
-
-  const [
-    showModes,
-    setShowModes,
-  ] = useState(false);
-
-  const [
-    showCreateGroup,
-    setShowCreateGroup,
-  ] = useState(false);
-
-  const [
-    showComposerMenu,
-    setShowComposerMenu,
-  ] = useState(false);
-
-  const [
-    composerPanel,
-    setComposerPanel,
-  ] = useState(null);
-
-
-  /* =======================================================
-     GROUP CREATION
-  ======================================================= */
-
-  const [
-    groupName,
-    setGroupName,
-  ] = useState('');
-
-  const [
-    groupDescription,
-    setGroupDescription,
-  ] = useState('');
-
-  const [
-    selectedGroupFriends,
-    setSelectedGroupFriends,
-  ] = useState({});
-
-  const [
-    creatingGroup,
-    setCreatingGroup,
-  ] = useState(false);
-
-
-  /* =======================================================
-     POLL CREATION
-  ======================================================= */
-
-  const [
-    pollQuestion,
-    setPollQuestion,
-  ] = useState('');
-
-  const [
-    pollDescription,
-    setPollDescription,
-  ] = useState('');
-
-  const [
-    pollOptions,
-    setPollOptions,
-  ] = useState([
-    '',
-    '',
-  ]);
-
-  const [
-    creatingPoll,
-    setCreatingPoll,
-  ] = useState(false);
-
-
-  /* =======================================================
-     EVENT CREATION
-  ======================================================= */
-
-  const [
-    eventName,
-    setEventName,
-  ] = useState('');
-
-  const [
-    eventDescription,
-    setEventDescription,
-  ] = useState('');
-
-  const [
-    eventStart,
-    setEventStart,
-  ] = useState('');
-
-  const [
-    eventEnd,
-    setEventEnd,
-  ] = useState('');
-
-  const [
-    creatingEvent,
-    setCreatingEvent,
-  ] = useState(false);
-
-
-  /* =======================================================
-     GIF / STICKER UI
-  ======================================================= */
-
-  const [
-    gifStickerMode,
-    setGifStickerMode,
-  ] = useState('gif');
-
-  const [
-    gifStickerSearch,
-    setGifStickerSearch,
-  ] = useState('');
-
-  const [
-    gifStickerCategory,
-    setGifStickerCategory,
-  ] = useState('normal');
-
-
-  /* =======================================================
-     CALL UI
-  ======================================================= */
-
-  const [
-    showCallScreen,
-    setShowCallScreen,
-  ] = useState(false);
-
-  const [
-    callMode,
-    setCallMode,
-  ] = useState('voice');
-
-  const [
-    callParticipants,
-    setCallParticipants,
-  ] = useState([]);
-
-  const [
-    mutedParticipants,
-    setMutedParticipants,
-  ] = useState({});
-
-  const [
-    callOutput,
-    setCallOutput,
-  ] = useState('Mobile');
-
-
-  /* =======================================================
-     VOICE MESSAGE UI
-  ======================================================= */
-
-  const [
-    voiceRecording,
-    setVoiceRecording,
-  ] = useState(false);
-
-  const [
-    voiceDuration,
-    setVoiceDuration,
-  ] = useState(0);
-
-  const voiceTimerRef =
-    useRef(null);
-
-
-  /* =======================================================
-     SEARCH INPUT
-  ======================================================= */
-
-  const searchInputRef =
-    useRef(null);
-
-  const messagesListRef =
-    useRef(null);
-
-
-  /* =========================================================
-     CURRENT PROFILE
-  ========================================================= */
+  return (
+    <View style={styles.emptyState}>
+      <Ionicons
+        name={icon}
+        size={44}
+        color={COLORS.secondary}
+      />
+
+      <Text style={styles.emptyTitle}>
+        {title}
+      </Text>
+
+      <Text style={styles.emptyText}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+export default function ChatScreen({ onNavigate }) {
+  const user = auth.currentUser;
+  const uid = user?.uid || null;
+
+  const [profile, setProfile] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [friendRequests, setFriendRequests] = useState([]);
+  const [dmRequests, setDmRequests] = useState([]);
+  const [messages, setMessages] = useState([]);
+
+  const [screen, setScreen] = useState('main');
+  const [activeTab, setActiveTab] = useState('All');
+  const [selected, setSelected] = useState(null);
+
+  const [search, setSearch] = useState('');
+  const [searchResult, setSearchResult] = useState(null);
+  const [searching, setSearching] = useState(false);
+
+  const [messageText, setMessageText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [loadingFriends, setLoadingFriends] = useState(true);
+
+  const [typingUsers, setTypingUsers] = useState({});
+  const [showModes, setShowModes] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
+  const [panel, setPanel] = useState(null);
+  const [showGroup, setShowGroup] = useState(false);
+
+  const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+  const [groupSelected, setGroupSelected] = useState({});
+
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollDescription, setPollDescription] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
+  const [creatingPoll, setCreatingPoll] = useState(false);
+
+  const [eventName, setEventName] = useState('');
+  const [eventDescription, setEventDescription] = useState('');
+  const [eventStart, setEventStart] = useState('');
+  const [eventEnd, setEventEnd] = useState('');
+  const [creatingEvent, setCreatingEvent] = useState(false);
+
+  const [gifMode, setGifMode] = useState('gif');
+  const [gifCategory, setGifCategory] = useState('normal');
+  const [gifSearch, setGifSearch] = useState('');
+
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+
+  const [showCall, setShowCall] = useState(false);
+  const [callMode, setCallMode] = useState('voice');
+  const [callMuted, setCallMuted] = useState(false);
+
+  const typingTimer = useRef(null);
+  const recordingTimer = useRef(null);
+  const listRef = useRef(null);
 
   useEffect(() => {
-    if (!currentUser) {
-      setCurrentProfile(null);
-      return;
+    if (!uid) {
+      setProfile(null);
+      return undefined;
     }
 
-    const unsubscribe =
-      onSnapshot(
-        doc(
-          db,
-          'users',
-          currentUser.uid
-        ),
-        (snapshot) => {
-          if (
-            snapshot.exists()
-          ) {
-            setCurrentProfile({
-              id: snapshot.id,
-              ...snapshot.data(),
-            });
-          }
-        },
-        (error) => {
-          console.error(
-            'Chat profile listener:',
-            error
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     CONVERSATIONS
-  ========================================================= */
+    return onSnapshot(
+      doc(db, 'users', uid),
+      snap => {
+        setProfile(
+          snap.exists()
+            ? { id: snap.id, ...snap.data() }
+            : null
+        );
+      },
+      error => {
+        console.error('Profile listener error:', error);
+      }
+    );
+  }, [uid]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!uid) {
       setConversations([]);
-      setLoadingConversations(
-        false
-      );
-      return;
+      setLoadingChats(false);
+      return undefined;
     }
 
-    setLoadingConversations(
-      true
+    setLoadingChats(true);
+
+    const q = query(
+      collection(db, 'conversations'),
+      where('memberIds', 'array-contains', uid)
     );
 
-    const conversationsQuery =
-      query(
-        collection(
-          db,
-          'conversations'
-        ),
-        where(
-          'members',
-          'array-contains',
-          currentUser.uid
-        )
-      );
+    return onSnapshot(
+      q,
+      snap => {
+        const rows = snap.docs.map(item => ({
+          id: item.id,
+          ...item.data(),
+        }));
 
-    const unsubscribe =
-      onSnapshot(
-        conversationsQuery,
-        (snapshot) => {
-          const list =
-            snapshot.docs.map(
-              (item) => ({
-                id: item.id,
-                ...item.data(),
-              })
-            );
+        rows.sort(
+          (a, b) =>
+            millis(b.updatedAt || b.lastMessageAt) -
+            millis(a.updatedAt || a.lastMessageAt)
+        );
 
-          list.sort(
-            (a, b) =>
-              timestampToMillis(
-                b.lastMessageAt
-              ) -
-              timestampToMillis(
-                a.lastMessageAt
-              )
-          );
-
-          setConversations(
-            list
-          );
-
-          setLoadingConversations(
-            false
-          );
-        },
-        (error) => {
-          console.error(
-            'Conversation listener:',
-            error
-          );
-
-          setLoadingConversations(
-            false
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     FRIENDS
-  ========================================================= */
+        setConversations(rows);
+        setLoadingChats(false);
+      },
+      error => {
+        console.error('Conversation listener error:', error);
+        setLoadingChats(false);
+      }
+    );
+  }, [uid]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!uid) {
       setFriends([]);
-      setLoadingFriends(
-        false
-      );
-      return;
+      setLoadingFriends(false);
+      return undefined;
     }
 
     setLoadingFriends(true);
 
-    const unsubscribe =
-      onSnapshot(
-        collection(
-          db,
-          'users',
-          currentUser.uid,
-          'friends'
-        ),
-        (snapshot) => {
-          const list =
-            snapshot.docs.map(
-              (item) => ({
-                id: item.id,
-                ...item.data(),
-              })
-            );
+    const q = collection(db, 'users', uid, 'friends');
 
-          list.sort(
-            (a, b) =>
-              String(
-                a.username ||
-                  a.displayName ||
-                  ''
-              ).localeCompare(
-                String(
-                  b.username ||
-                    b.displayName ||
-                    ''
-                )
-              )
-          );
+    return onSnapshot(
+      q,
+      snap => {
+        setFriends(
+          snap.docs.map(item => ({
+            id: item.id,
+            ...item.data(),
+          }))
+        );
 
-          setFriends(list);
-
-          setLoadingFriends(
-            false
-          );
-        },
-        (error) => {
-          console.error(
-            'Friends listener:',
-            error
-          );
-
-          setLoadingFriends(
-            false
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     FRIEND REQUESTS
-  ========================================================= */
+        setLoadingFriends(false);
+      },
+      error => {
+        console.error('Friends listener error:', error);
+        setLoadingFriends(false);
+      }
+    );
+  }, [uid]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!uid) {
       setFriendRequests([]);
-      return;
+      return undefined;
     }
 
-    const requestsQuery =
-      query(
-        collection(
-          db,
-          'users',
-          currentUser.uid,
-          'friendRequests'
-        ),
-        where(
-          'status',
-          '==',
-          'pending'
-        )
-      );
+    const q = query(
+      collection(db, 'friendRequests'),
+      where('toUid', '==', uid),
+      where('status', '==', 'pending')
+    );
 
-    const unsubscribe =
-      onSnapshot(
-        requestsQuery,
-        (snapshot) => {
-          setFriendRequests(
-            snapshot.docs.map(
-              (item) => ({
-                id: item.id,
-                ...item.data(),
-              })
-            )
-          );
-        },
-        (error) => {
-          console.error(
-            'Friend requests:',
-            error
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     DM REQUESTS
-  ========================================================= */
+    return onSnapshot(
+      q,
+      snap => {
+        setFriendRequests(
+          snap.docs.map(item => ({
+            id: item.id,
+            ...item.data(),
+          }))
+        );
+      },
+      error => {
+        console.error(
+          'Friend request listener error:',
+          error
+        );
+      }
+    );
+  }, [uid]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!uid) {
       setDmRequests([]);
-      return;
+      return undefined;
     }
 
-    const requestsQuery =
-      query(
-        collection(
-          db,
-          'users',
-          currentUser.uid,
-          'dmRequests'
-        ),
-        where(
-          'status',
-          '==',
-          'pending'
-        )
-      );
+    const q = query(
+      collection(db, 'dmRequests'),
+      where('toUid', '==', uid),
+      where('status', '==', 'pending')
+    );
 
-    const unsubscribe =
-      onSnapshot(
-        requestsQuery,
-        (snapshot) => {
-          setDmRequests(
-            snapshot.docs.map(
-              (item) => ({
-                id: item.id,
-                ...item.data(),
-              })
-            )
-          );
-        },
-        (error) => {
-          console.error(
-            'DM requests:',
-            error
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     ACTIVE MESSAGES
-  ========================================================= */
+    return onSnapshot(
+      q,
+      snap => {
+        setDmRequests(
+          snap.docs.map(item => ({
+            id: item.id,
+            ...item.data(),
+          }))
+        );
+      },
+      error => {
+        console.error(
+          'DM request listener error:',
+          error
+        );
+      }
+    );
+  }, [uid]);
 
   useEffect(() => {
-    if (
-      !selectedConversation
-    ) {
+    if (!selected?.id) {
       setMessages([]);
-      return;
+      return undefined;
     }
 
-    const messagesRef =
+    const q = query(
       collection(
         db,
         'conversations',
-        selectedConversation.id,
+        selected.id,
         'messages'
-      );
+      )
+    );
 
-    const unsubscribe =
-      onSnapshot(
-        messagesRef,
-        (snapshot) => {
-          const list =
-            snapshot.docs.map(
-              (item) => ({
-                id: item.id,
-                ...item.data(),
-              })
-            );
+    return onSnapshot(
+      q,
+      snap => {
+        const rows = snap.docs.map(item => ({
+          id: item.id,
+          ...item.data(),
+        }));
 
-          list.sort(
-            (a, b) =>
-              timestampToMillis(
-                a.createdAt
-              ) -
-              timestampToMillis(
-                b.createdAt
-              )
-          );
+        rows.sort(
+          (a, b) =>
+            millis(a.createdAt) - millis(b.createdAt)
+        );
 
-          setMessages(list);
-
-          setTimeout(() => {
-            messagesListRef.current?.scrollToEnd?.({
-              animated: false,
-            });
-          }, 50);
-        },
-        (error) => {
-          console.error(
-            'Messages listener:',
-            error
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    selectedConversation?.id,
-  ]);
-
-
-  /* =========================================================
-     REAL-TIME ACTIVITY
-  ========================================================= */
+        setMessages(rows);
+      },
+      error => {
+        console.error('Messages listener error:', error);
+      }
+    );
+  }, [selected?.id]);
 
   useEffect(() => {
-    if (
-      !selectedConversation ||
-      !currentUser
-    ) {
+    if (!selected?.id || !uid) {
       setTypingUsers({});
-      return;
+      return undefined;
     }
 
-    const activityRef =
-      collection(
-        db,
-        'conversations',
-        selectedConversation.id,
-        'activity'
-      );
+    const q = collection(
+      db,
+      'conversations',
+      selected.id,
+      'activity'
+    );
 
-    const unsubscribe =
-      onSnapshot(
-        activityRef,
-        (snapshot) => {
-          const now =
-            Date.now();
+    return onSnapshot(
+      q,
+      snap => {
+        const now = Date.now();
+        const next = {};
 
-          const next = {};
+        snap.docs.forEach(item => {
+          if (item.id === uid) return;
 
-          snapshot.docs.forEach(
-            (item) => {
-              if (
-                item.id ===
-                currentUser.uid
-              ) {
-                return;
-              }
+          const data = item.data();
+          const expiresAt = millis(data.expiresAt);
 
-              const data =
-                item.data();
-
-              const updated =
-                timestampToMillis(
-                  data.updatedAt
-                );
-
-              if (
-                updated &&
-                now - updated <
-                  6000 &&
-                data.type ===
-                  'typing'
-              ) {
-                next[item.id] = {
-                  id: item.id,
-                  ...data,
-                };
-              }
-            }
-          );
-
-          setTypingUsers(
-            next
-          );
-        },
-        (error) => {
-          console.error(
-            'Activity listener:',
-            error
-          );
-        }
-      );
-
-    return unsubscribe;
-  }, [
-    selectedConversation?.id,
-    currentUser?.uid,
-  ]);
-
-
-  /* =========================================================
-     CONVERSATION HELPERS
-  ========================================================= */
-
-  const getConversationTitle =
-    (conversation) => {
-      if (
-        !conversation
-      ) {
-        return '';
-      }
-
-      if (
-        conversation.type ===
-        'group'
-      ) {
-        return (
-          conversation.groupName ||
-          'Unnamed group'
-        );
-      }
-
-      const otherUid =
-        conversation.members?.find(
-          (uid) =>
-            uid !==
-            currentUser?.uid
-        );
-
-      return (
-        conversation
-          .memberProfiles?.[
-          otherUid
-        ]?.displayName ||
-        conversation
-          .memberProfiles?.[
-          otherUid
-        ]?.username ||
-        'Unknown user'
-      );
-    };
-
-
-  const getConversationUsername =
-    (conversation) => {
-      if (
-        !conversation
-      ) {
-        return '';
-      }
-
-      if (
-        conversation.type ===
-        'group'
-      ) {
-        return `${
-          conversation.members
-            ?.length || 0
-        } members`;
-      }
-
-      const otherUid =
-        conversation.members?.find(
-          (uid) =>
-            uid !==
-            currentUser?.uid
-        );
-
-      const username =
-        conversation
-          .memberProfiles?.[
-          otherUid
-        ]?.username;
-
-      return username
-        ? `@${username}`
-        : '';
-    };
-
-
-  const isFavorite =
-    (conversation) =>
-      conversation
-        ?.favoriteBy?.[
-        currentUser?.uid
-      ] === true;
-
-
-  const isUrgent =
-    (conversation) =>
-      conversation
-        ?.urgentFor?.[
-        currentUser?.uid
-      ] === true;
-
-
-  /* =========================================================
-     OPEN DIRECT
-  ========================================================= */
-
-  const openDirectConversation =
-    async (targetUser) => {
-      if (
-        !currentUser ||
-        !targetUser
-      ) {
-        return;
-      }
-
-      try {
-        const conversationId =
-          makeDirectConversationId(
-            currentUser.uid,
-            targetUser.id
-          );
-
-        const conversationRef =
-          doc(
-            db,
-            'conversations',
-            conversationId
-          );
-
-        const snapshot =
-          await getDoc(
-            conversationRef
-          );
-
-        if (
-          !snapshot.exists()
-        ) {
-          await setDoc(
-            conversationRef,
-            {
-              type: 'direct',
-
-              members: [
-                currentUser.uid,
-                targetUser.id,
-              ],
-
-              memberProfiles: {
-                [currentUser.uid]: {
-                  username:
-                    currentProfile?.username ||
-                    '',
-
-                  displayName:
-                    currentProfile?.displayName ||
-                    '',
-                },
-
-                [targetUser.id]: {
-                  username:
-                    targetUser.username ||
-                    '',
-
-                  displayName:
-                    targetUser.displayName ||
-                    '',
-                },
-              },
-
-              favoriteBy: {},
-              urgentFor: {},
-              lastReadAt: {},
-
-              createdAt:
-                serverTimestamp(),
-
-              lastMessage: '',
-              lastMessageAt:
-                null,
-
-              lastMessageSenderUid:
-                null,
-            }
-          );
-        }
-
-        const updated =
-          await getDoc(
-            conversationRef
-          );
-
-        await openConversation({
-          id: conversationId,
-          ...(updated.exists()
-            ? updated.data()
-            : {}),
+          if (
+            data.typing === true &&
+            expiresAt > now
+          ) {
+            next[item.id] = data;
+          }
         });
-      } catch (error) {
+
+        setTypingUsers(next);
+      },
+      error => {
         console.error(
-          'Open direct conversation:',
-          error
-        );
-
-        Alert.alert(
-          'Could not open chat',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     OPEN CONVERSATION
-  ========================================================= */
-
-  const openConversation =
-    async (
-      conversation
-    ) => {
-      if (
-        !conversation
-      ) {
-        return;
-      }
-
-      setSelectedConversation(
-        conversation
-      );
-
-      setScreen(
-        'conversation'
-      );
-
-      setMessageText('');
-
-      setTypingUsers({});
-
-      setComposerPanel(
-        null
-      );
-
-      setShowComposerMenu(
-        false
-      );
-
-      if (
-        !currentUser
-      ) {
-        return;
-      }
-
-      try {
-        await updateDoc(
-          doc(
-            db,
-            'conversations',
-            conversation.id
-          ),
-          {
-            [`urgentFor.${currentUser.uid}`]:
-              false,
-
-            [`lastReadAt.${currentUser.uid}`]:
-              serverTimestamp(),
-          }
-        );
-      } catch (error) {
-        console.log(
-          'Read state update:',
+          'Typing listener error:',
           error
         );
       }
-    };
-
-
-  /* =========================================================
-     CLOSE CONVERSATION
-  ========================================================= */
-
-  const clearTypingState =
-    async () => {
-      if (
-        !currentUser ||
-        !selectedConversation
-      ) {
-        return;
-      }
-
-      try {
-        await deleteDoc(
-          doc(
-            db,
-            'conversations',
-            selectedConversation.id,
-            'activity',
-            currentUser.uid
-          )
-        );
-      } catch (error) {
-        console.log(
-          'Clear activity:',
-          error
-        );
-      }
-    };
-
-
-  const closeConversation =
-    async () => {
-      if (
-        typingTimeoutRef.current
-      ) {
-        clearTimeout(
-          typingTimeoutRef.current
-        );
-      }
-
-      await clearTypingState();
-
-      setSelectedConversation(
-        null
-      );
-
-      setMessages([]);
-
-      setMessageText('');
-
-      setTypingUsers({});
-
-      setScreen('main');
-    };
-
-
-  /* =========================================================
-     SEARCH
-  ========================================================= */
-
-  const searchUser =
-    async () => {
-      const username =
-        searchQuery
-          .trim()
-          .toLowerCase();
-
-      if (!username) {
-        setSearchResult(
-          null
-        );
-        return;
-      }
-
-      if (!currentUser) {
-        Alert.alert(
-          'Not signed in',
-          'Please sign in first.'
-        );
-        return;
-      }
-
-      setSearching(true);
-
-      try {
-        const usernameSnapshot =
-          await getDoc(
-            doc(
-              db,
-              'usernames',
-              username
-            )
-          );
-
-        if (
-          !usernameSnapshot.exists()
-        ) {
-          setSearchResult(
-            null
-          );
-
-          Alert.alert(
-            'User not found',
-            `No Shinzi user with @${username} was found.`
-          );
-
-          return;
-        }
-
-        const targetUid =
-          usernameSnapshot.data()
-            ?.uid;
-
-        if (
-          !targetUid
-        ) {
-          throw new Error(
-            'Username record has no uid.'
-          );
-        }
-
-        if (
-          targetUid ===
-          currentUser.uid
-        ) {
-          setSearchResult(
-            null
-          );
-
-          Alert.alert(
-            'That is you',
-            'You cannot start a chat with yourself.'
-          );
-
-          return;
-        }
-
-        const userSnapshot =
-          await getDoc(
-            doc(
-              db,
-              'users',
-              targetUid
-            )
-          );
-
-        if (
-          !userSnapshot.exists()
-        ) {
-          throw new Error(
-            'User profile does not exist.'
-          );
-        }
-
-        setSearchResult({
-          id: targetUid,
-          ...userSnapshot.data(),
-        });
-      } catch (error) {
-        console.error(
-          'Search user:',
-          error
-        );
-
-        Alert.alert(
-          'Search failed',
-          error.message ||
-            'Something went wrong.'
-        );
-      } finally {
-        setSearching(false);
-      }
-    };
-
-
-  /* =========================================================
-     FRIEND CHECK
-  ========================================================= */
-
-  const isFriend =
-    async (
-      targetUid
-    ) => {
-      if (
-        !currentUser ||
-        !targetUid
-      ) {
-        return false;
-      }
-
-      const snapshot =
-        await getDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'friends',
-            targetUid
-          )
-        );
-
-      return snapshot.exists();
-    };
-
-
-  /* =========================================================
-     SEND FRIEND REQUEST
-  ========================================================= */
-
-  const sendFriendRequest =
-    async (
-      targetUser
-    ) => {
-      if (
-        !currentUser ||
-        !targetUser
-      ) {
-        return;
-      }
-
-      try {
-        if (
-          await isFriend(
-            targetUser.id
-          )
-        ) {
-          Alert.alert(
-            'Already friends',
-            `@${targetUser.username} is already your friend.`
-          );
-
-          return;
-        }
-
-        const requestRef =
-          doc(
-            db,
-            'users',
-            targetUser.id,
-            'friendRequests',
-            currentUser.uid
-          );
-
-        const existing =
-          await getDoc(
-            requestRef
-          );
-
-        if (
-          existing.exists() &&
-          existing.data()
-            ?.status ===
-            'pending'
-        ) {
-          Alert.alert(
-            'Already sent',
-            'That friend request is already pending.'
-          );
-
-          return;
-        }
-
-        await setDoc(
-          requestRef,
-          {
-            senderUid:
-              currentUser.uid,
-
-            senderUsername:
-              currentProfile?.username ||
-              '',
-
-            senderDisplayName:
-              currentProfile?.displayName ||
-              '',
-
-            status:
-              'pending',
-
-            createdAt:
-              serverTimestamp(),
-          }
-        );
-
-        Alert.alert(
-          'Request sent',
-          `Friend request sent to @${targetUser.username}.`
-        );
-      } catch (error) {
-        console.error(
-          'Friend request:',
-          error
-        );
-
-        Alert.alert(
-          'Could not send request',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     ACCEPT FRIEND
-  ========================================================= */
-
-  const acceptFriendRequest =
-    async (
-      request
-    ) => {
-      if (
-        !currentUser ||
-        !request?.senderUid
-      ) {
-        return;
-      }
-
-      try {
-        const senderSnapshot =
-          await getDoc(
-            doc(
-              db,
-              'users',
-              request.senderUid
-            )
-          );
-
-        if (
-          !senderSnapshot.exists()
-        ) {
-          throw new Error(
-            'The sender profile no longer exists.'
-          );
-        }
-
-        const sender =
-          senderSnapshot.data();
-
-        await setDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'friends',
-            request.senderUid
-          ),
-          {
-            uid:
-              request.senderUid,
-
-            username:
-              sender.username ||
-              request.senderUsername ||
-              '',
-
-            displayName:
-              sender.displayName ||
-              request.senderDisplayName ||
-              '',
-
-            addedAt:
-              serverTimestamp(),
-          }
-        );
-
-        await setDoc(
-          doc(
-            db,
-            'users',
-            request.senderUid,
-            'friends',
-            currentUser.uid
-          ),
-          {
-            uid:
-              currentUser.uid,
-
-            username:
-              currentProfile?.username ||
-              '',
-
-            displayName:
-              currentProfile?.displayName ||
-              '',
-
-            addedAt:
-              serverTimestamp(),
-          }
-        );
-
-        await deleteDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'friendRequests',
-            request.senderUid
-          )
-        );
-      } catch (error) {
-        console.error(
-          'Accept friend:',
-          error
-        );
-
-        Alert.alert(
-          'Could not accept',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  const rejectFriendRequest =
-    async (
-      request
-    ) => {
-      try {
-        await deleteDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'friendRequests',
-            request.senderUid
-          )
-        );
-      } catch (error) {
-        Alert.alert(
-          'Could not reject',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     DM REQUEST
-  ========================================================= */
-
-  const sendDMRequest =
-    async (
-      targetUser
-    ) => {
-      if (
-        !currentUser ||
-        !targetUser
-      ) {
-        return;
-      }
-
-      try {
-        if (
-          await isFriend(
-            targetUser.id
-          )
-        ) {
-          await openDirectConversation(
-            targetUser
-          );
-
-          return;
-        }
-
-        const requestRef =
-          doc(
-            db,
-            'users',
-            targetUser.id,
-            'dmRequests',
-            currentUser.uid
-          );
-
-        const existing =
-          await getDoc(
-            requestRef
-          );
-
-        if (
-          existing.exists() &&
-          existing.data()
-            ?.status ===
-            'pending'
-        ) {
-          Alert.alert(
-            'Already sent',
-            'Your DM request is already pending.'
-          );
-
-          return;
-        }
-
-        await setDoc(
-          requestRef,
-          {
-            senderUid:
-              currentUser.uid,
-
-            senderUsername:
-              currentProfile?.username ||
-              '',
-
-            senderDisplayName:
-              currentProfile?.displayName ||
-              '',
-
-            status:
-              'pending',
-
-            createdAt:
-              serverTimestamp(),
-          }
-        );
-
-        Alert.alert(
-          'DM request sent',
-          `@${targetUser.username} will see your request.`
-        );
-      } catch (error) {
-        Alert.alert(
-          'Could not send DM request',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  const acceptDMRequest =
-    async (
-      request
-    ) => {
-      try {
-        const senderSnapshot =
-          await getDoc(
-            doc(
-              db,
-              'users',
-              request.senderUid
-            )
-          );
-
-        if (
-          !senderSnapshot.exists()
-        ) {
-          throw new Error(
-            'Sender profile no longer exists.'
-          );
-        }
-
-        const sender =
-          senderSnapshot.data();
-
-        const conversationId =
-          makeDirectConversationId(
-            currentUser.uid,
-            request.senderUid
-          );
-
-        const conversationRef =
-          doc(
-            db,
-            'conversations',
-            conversationId
-          );
-
-        await setDoc(
-          conversationRef,
-          {
-            type: 'direct',
-
-            members: [
-              currentUser.uid,
-              request.senderUid,
-            ],
-
-            memberProfiles: {
-              [currentUser.uid]: {
-                username:
-                  currentProfile?.username ||
-                  '',
-
-                displayName:
-                  currentProfile?.displayName ||
-                  '',
-              },
-
-              [request.senderUid]: {
-                username:
-                  sender.username ||
-                  request.senderUsername ||
-                  '',
-
-                displayName:
-                  sender.displayName ||
-                  request.senderDisplayName ||
-                  '',
-              },
-            },
-
-            favoriteBy: {},
-            urgentFor: {},
-            lastReadAt: {},
-
-            createdAt:
-              serverTimestamp(),
-
-            lastMessage: '',
-            lastMessageAt:
-              null,
-
-            lastMessageSenderUid:
-              null,
-          },
-          {
-            merge: true,
-          }
-        );
-
-        await deleteDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'dmRequests',
-            request.senderUid
-          )
-        );
-
-        const latest =
-          await getDoc(
-            conversationRef
-          );
-
-        await openConversation({
-          id: conversationId,
-          ...(latest.exists()
-            ? latest.data()
-            : {}),
-        });
-      } catch (error) {
-        Alert.alert(
-          'Could not accept',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  const rejectDMRequest =
-    async (
-      request
-    ) => {
-      try {
-        await deleteDoc(
-          doc(
-            db,
-            'users',
-            currentUser.uid,
-            'dmRequests',
-            request.senderUid
-          )
-        );
-      } catch (error) {
-        Alert.alert(
-          'Could not reject',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     TYPING
-  ========================================================= */
-
-  const publishTypingState =
-    async (
-      active
-    ) => {
-      if (
-        !currentUser ||
-        !selectedConversation
-      ) {
-        return;
-      }
-
-      const activityRef =
-        doc(
-          db,
-          'conversations',
-          selectedConversation.id,
-          'activity',
-          currentUser.uid
-        );
-
-      if (!active) {
-        try {
-          await deleteDoc(
-            activityRef
-          );
-        } catch (error) {
-          console.log(
-            'Typing clear:',
-            error
-          );
-        }
-
-        return;
-      }
-
-      try {
-        await setDoc(
-          activityRef,
-          {
-            uid:
-              currentUser.uid,
-
-            username:
-              currentProfile?.username ||
-              '',
-
-            displayName:
-              currentProfile?.displayName ||
-              '',
-
-            type:
-              'typing',
-
-            updatedAt:
-              serverTimestamp(),
-          }
-        );
-      } catch (error) {
-        console.error(
-          'Typing state:',
-          error
-        );
-      }
-    };
-
-
-  const handleMessageTextChange =
-    (value) => {
-      setMessageText(
-        value
-      );
-
-      if (
-        typingTimeoutRef.current
-      ) {
-        clearTimeout(
-          typingTimeoutRef.current
-        );
-      }
-
-      if (
-        !value.trim()
-      ) {
-        publishTypingState(
-          false
-        );
-
-        return;
-      }
-
-      publishTypingState(
-        true
-      );
-
-      typingTimeoutRef.current =
-        setTimeout(
-          () => {
-            publishTypingState(
-              false
-            );
-          },
-          5000
-        );
-    };
-
-
-  /* =========================================================
-     SEND TEXT MESSAGE
-  ========================================================= */
-
-  const sendMessage =
-    async () => {
-      const text =
-        messageText.trim();
-
-      if (
-        !text ||
-        !currentUser ||
-        !selectedConversation ||
-        sendingMessage
-      ) {
-        return;
-      }
-
-      setSendingMessage(
-        true
-      );
-
-      try {
-        await publishTypingState(
-          false
-        );
-
-        const messageRef =
-          await addDoc(
-            collection(
-              db,
-              'conversations',
-              selectedConversation.id,
-              'messages'
-            ),
-            {
-              senderUid:
-                currentUser.uid,
-
-              senderUsername:
-                currentProfile?.username ||
-                '',
-
-              senderDisplayName:
-                currentProfile?.displayName ||
-                '',
-
-              text,
-
-              type: 'text',
-
-              createdAt:
-                serverTimestamp(),
-            }
-          );
-
-        const urgentUpdates =
-          {};
-
-        for (
-          const memberUid of
-          selectedConversation.members ||
-          []
-        ) {
-          if (
-            memberUid ===
-            currentUser.uid
-          ) {
-            continue;
-          }
-
-          const memberProfile =
-            selectedConversation
-              .memberProfiles?.[
-              memberUid
-            ];
-
-          if (
-            containsMention(
-              text,
-              memberProfile?.username
-            )
-          ) {
-            urgentUpdates[
-              `urgentFor.${memberUid}`
-            ] = true;
-          }
-        }
-
-        await updateDoc(
-          doc(
-            db,
-            'conversations',
-            selectedConversation.id
-          ),
-          {
-            lastMessage:
-              text,
-
-            lastMessageAt:
-              serverTimestamp(),
-
-            lastMessageSenderUid:
-              currentUser.uid,
-
-            lastMessageId:
-              messageRef.id,
-
-            ...urgentUpdates,
-          }
-        );
-
-        setMessageText('');
-      } catch (error) {
-        console.error(
-          'Send message:',
-          error
-        );
-
-        Alert.alert(
-          'Message failed',
-          error.message ||
-            'The message could not be sent.'
-        );
-      } finally {
-        setSendingMessage(
-          false
-        );
-      }
-    };
-
-
-  /* =========================================================
-     FAVORITE
-  ========================================================= */
-
-  const toggleFavorite =
-    async (
-      conversation
-    ) => {
-      if (
-        !currentUser ||
-        !conversation
-      ) {
-        return;
-      }
-
-      try {
-        await updateDoc(
-          doc(
-            db,
-            'conversations',
-            conversation.id
-          ),
-          {
-            [`favoriteBy.${currentUser.uid}`]:
-              !isFavorite(
-                conversation
-              ),
-          }
-        );
-      } catch (error) {
-        Alert.alert(
-          'Could not update favorite',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     GROUPS
-  ========================================================= */
-
-  const toggleGroupFriend =
-    (friendUid) => {
-      setSelectedGroupFriends(
-        (previous) => ({
-          ...previous,
-
-          [friendUid]:
-            !previous[
-              friendUid
-            ],
-        })
-      );
-    };
-
-
-  const createGroup =
-    async () => {
-      if (!currentUser) {
-        return;
-      }
-
-      const cleanName =
-        groupName.trim();
-
-      const selectedFriends =
-        friends.filter(
-          (friend) =>
-            selectedGroupFriends[
-              friend.id
-            ] === true
-        );
-
-      if (!cleanName) {
-        Alert.alert(
-          'Group name required',
-          'Please enter a group name.'
-        );
-
-        return;
-      }
-
-      if (
-        selectedFriends.length ===
-        0
-      ) {
-        Alert.alert(
-          'Add friends',
-          'Select at least one friend.'
-        );
-
-        return;
-      }
-
-      setCreatingGroup(
-        true
-      );
-
-      try {
-        const members = [
-          currentUser.uid,
-          ...selectedFriends.map(
-            (friend) =>
-              friend.id
-          ),
-        ];
-
-        const memberProfiles = {
-          [currentUser.uid]: {
-            username:
-              currentProfile?.username ||
-              '',
-
-            displayName:
-              currentProfile?.displayName ||
-              '',
-          },
-        };
-
-        selectedFriends.forEach(
-          (friend) => {
-            memberProfiles[
-              friend.id
-            ] = {
-              username:
-                friend.username ||
-                '',
-
-              displayName:
-                friend.displayName ||
-                '',
-            };
-          }
-        );
-
-        const conversationRef =
-          doc(
-            collection(
-              db,
-              'conversations'
-            )
-          );
-
-        await setDoc(
-          conversationRef,
-          {
-            type: 'group',
-
-            groupName:
-              cleanName,
-
-            groupDescription:
-              groupDescription.trim(),
-
-            groupOwnerUid:
-              currentUser.uid,
-
-            members,
-
-            memberProfiles,
-
-            favoriteBy: {},
-            urgentFor: {},
-            lastReadAt: {},
-
-            createdAt:
-              serverTimestamp(),
-
-            lastMessage: '',
-            lastMessageAt:
-              null,
-
-            lastMessageSenderUid:
-              null,
-          }
-        );
-
-        setGroupName('');
-        setGroupDescription('');
-        setSelectedGroupFriends(
-          {}
-        );
-
-        setShowCreateGroup(
-          false
-        );
-
-        setActiveTab(
-          'Groups'
-        );
-      } catch (error) {
-        Alert.alert(
-          'Could not create group',
-          error.message ||
-            'Something went wrong.'
-        );
-      } finally {
-        setCreatingGroup(
-          false
-        );
-      }
-    };
-
-
-  /* =========================================================
-     POLL CREATION
-  ========================================================= */
-
-  const addPollOption =
-    () => {
-      if (
-        pollOptions.length >=
-        MAX_POLL_OPTIONS
-      ) {
-        Alert.alert(
-          'Maximum reached',
-          `A poll can have up to ${MAX_POLL_OPTIONS} options.`
-        );
-
-        return;
-      }
-
-      setPollOptions(
-        (previous) => [
-          ...previous,
-          '',
-        ]
-      );
-    };
-
-
-  const removePollOption =
-    (index) => {
-      if (
-        pollOptions.length <=
-        2
-      ) {
-        return;
-      }
-
-      setPollOptions(
-        (previous) =>
-          previous.filter(
-            (_, i) =>
-              i !== index
-          )
-      );
-    };
-
-
-  const updatePollOption =
-    (
-      index,
-      value
-    ) => {
-      setPollOptions(
-        (previous) =>
-          previous.map(
-            (
-              option,
-              i
-            ) =>
-              i === index
-                ? value
-                : option
-          )
-      );
-    };
-
-
-  const resetPoll =
-    () => {
-      setPollQuestion('');
-      setPollDescription('');
-      setPollOptions([
-        '',
-        '',
-      ]);
-    };
-
-
-  const createPoll =
-    async () => {
-      if (
-        !currentUser ||
-        !selectedConversation
-      ) {
-        return;
-      }
-
-      const question =
-        pollQuestion.trim();
-
-      const options =
-        pollOptions
-          .map(
-            (option) =>
-              option.trim()
-          )
-          .filter(Boolean);
-
-      if (!question) {
-        Alert.alert(
-          'Question required',
-          'Enter your poll question.'
-        );
-
-        return;
-      }
-
-      if (
-        options.length <
-        2
-      ) {
-        Alert.alert(
-          'More options required',
-          'A poll needs at least two options.'
-        );
-
-        return;
-      }
-
-      if (
-        options.length >
-        MAX_POLL_OPTIONS
-      ) {
-        Alert.alert(
-          'Too many options',
-          `A poll can have up to ${MAX_POLL_OPTIONS} options.`
-        );
-
-        return;
-      }
-
-      setCreatingPoll(
-        true
-      );
-
-      try {
-        const votes = {};
-
-        options.forEach(
-          (_, index) => {
-            votes[index] = 0;
-          }
-        );
-
-        const messageRef =
-          await addDoc(
-            collection(
-              db,
-              'conversations',
-              selectedConversation.id,
-              'messages'
-            ),
-            {
-              type: 'poll',
-
-              senderUid:
-                currentUser.uid,
-
-              senderUsername:
-                currentProfile?.username ||
-                '',
-
-              senderDisplayName:
-                currentProfile?.displayName ||
-                '',
-
-              text: question,
-
-              poll: {
-                question,
-
-                description:
-                  pollDescription.trim(),
-
-                options,
-
-                votes,
-
-                voters: {},
-
-                createdBy:
-                  currentUser.uid,
-
-                allowMultiple:
-                  false,
-
-                createdAt:
-                  serverTimestamp(),
-              },
-
-              createdAt:
-                serverTimestamp(),
-            }
-          );
-
-        await updateDoc(
-          doc(
-            db,
-            'conversations',
-            selectedConversation.id
-          ),
-          {
-            lastMessage:
-              `📊 Poll: ${question}`,
-
-            lastMessageAt:
-              serverTimestamp(),
-
-            lastMessageSenderUid:
-              currentUser.uid,
-
-            lastMessageId:
-              messageRef.id,
-          }
-        );
-
-        resetPoll();
-
-        setComposerPanel(
-          null
-        );
-      } catch (error) {
-        console.error(
-          'Create poll:',
-          error
-        );
-
-        Alert.alert(
-          'Poll failed',
-          error.message ||
-            'The poll could not be created.'
-        );
-      } finally {
-        setCreatingPoll(
-          false
-        );
-      }
-    };
-
-
-  /* =========================================================
-     POLL VOTING
-  ========================================================= */
-
-  const votePoll =
-    async (
-      message,
-      optionIndex
-    ) => {
-      if (
-        !currentUser ||
-        !selectedConversation ||
-        !message?.poll
-      ) {
-        return;
-      }
-
-      const messageRef =
-        doc(
-          db,
-          'conversations',
-          selectedConversation.id,
-          'messages',
-          message.id
-        );
-
-      try {
-        const snapshot =
-          await getDoc(
-            messageRef
-          );
-
-        if (
-          !snapshot.exists()
-        ) {
-          return;
-        }
-
-        const data =
-          snapshot.data();
-
-        const poll =
-          data.poll || {};
-
-        const voters = {
-          ...(poll.voters || {}),
-        };
-
-        const votes = {
-          ...(poll.votes || {}),
-        };
-
-        const previousVote =
-          voters[
-            currentUser.uid
-          ];
-
-        /*
-         * This poll implementation allows
-         * one vote per user.
-         */
-
-        if (
-          previousVote !==
-          undefined
-        ) {
-          if (
-            previousVote ===
-            optionIndex
-          ) {
-            return;
-          }
-
-          votes[
-            previousVote
-          ] = Math.max(
-            0,
-            Number(
-              votes[
-                previousVote
-              ] || 0
-            ) - 1
-          );
-        }
-
-        votes[
-          optionIndex
-        ] =
-          Number(
-            votes[
-              optionIndex
-            ] || 0
-          ) + 1;
-
-        voters[
-          currentUser.uid
-        ] =
-          optionIndex;
-
-        await updateDoc(
-          messageRef,
-          {
-            'poll.votes':
-              votes,
-
-            'poll.voters':
-              voters,
-          }
-        );
-      } catch (error) {
-        console.error(
-          'Vote poll:',
-          error
-        );
-
-        Alert.alert(
-          'Vote failed',
-          error.message ||
-            'Your vote could not be saved.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     EVENT CREATION
-  ========================================================= */
-
-  const createEvent =
-    async () => {
-      if (
-        !currentUser ||
-        !selectedConversation
-      ) {
-        return;
-      }
-
-      const name =
-        eventName.trim();
-
-      if (!name) {
-        Alert.alert(
-          'Event name required',
-          'Enter an event name.'
-        );
-
-        return;
-      }
-
-      setCreatingEvent(
-        true
-      );
-
-      try {
-        const messageRef =
-          await addDoc(
-            collection(
-              db,
-              'conversations',
-              selectedConversation.id,
-              'messages'
-            ),
-            {
-              type: 'event',
-
-              senderUid:
-                currentUser.uid,
-
-              senderUsername:
-                currentProfile?.username ||
-                '',
-
-              senderDisplayName:
-                currentProfile?.displayName ||
-                '',
-
-              text:
-                `📅 Event: ${name}`,
-
-              event: {
-                name,
-
-                description:
-                  eventDescription.trim(),
-
-                startTime:
-                  eventStart.trim(),
-
-                endTime:
-                  eventEnd.trim(),
-
-                participants: {},
-
-                createdBy:
-                  currentUser.uid,
-
-                createdAt:
-                  serverTimestamp(),
-              },
-
-              createdAt:
-                serverTimestamp(),
-            }
-          );
-
-        await updateDoc(
-          doc(
-            db,
-            'conversations',
-            selectedConversation.id
-          ),
-          {
-            lastMessage:
-              `📅 Event: ${name}`,
-
-            lastMessageAt:
-              serverTimestamp(),
-
-            lastMessageSenderUid:
-              currentUser.uid,
-
-            lastMessageId:
-              messageRef.id,
-          }
-        );
-
-        setEventName('');
-        setEventDescription('');
-        setEventStart('');
-        setEventEnd('');
-
-        setComposerPanel(
-          null
-        );
-      } catch (error) {
-        console.error(
-          'Create event:',
-          error
-        );
-
-        Alert.alert(
-          'Event failed',
-          error.message ||
-            'The event could not be created.'
-        );
-      } finally {
-        setCreatingEvent(
-          false
-        );
-      }
-    };
-
-
-  /* =========================================================
-     EVENT JOIN
-  ========================================================= */
-
-  const joinEvent =
-    async (
-      message
-    ) => {
-      if (
-        !currentUser ||
-        !selectedConversation ||
-        !message?.event
-      ) {
-        return;
-      }
-
-      const messageRef =
-        doc(
-          db,
-          'conversations',
-          selectedConversation.id,
-          'messages',
-          message.id
-        );
-
-      try {
-        const snapshot =
-          await getDoc(
-            messageRef
-          );
-
-        if (
-          !snapshot.exists()
-        ) {
-          return;
-        }
-
-        const data =
-          snapshot.data();
-
-        const participants = {
-          ...(data.event
-            ?.participants ||
-            {}),
-        };
-
-        participants[
-          currentUser.uid
-        ] = {
-          uid:
-            currentUser.uid,
-
-          username:
-            currentProfile?.username ||
-            '',
-
-          displayName:
-            currentProfile?.displayName ||
-            '',
-
-          joinedAt:
-            new Date().toISOString(),
-        };
-
-        await updateDoc(
-          messageRef,
-          {
-            'event.participants':
-              participants,
-          }
-        );
-      } catch (error) {
-        console.error(
-          'Join event:',
-          error
-        );
-
-        Alert.alert(
-          'Could not join',
-          error.message ||
-            'The event could not be joined.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     MEDIA PICKER
-  ========================================================= */
-
-  const pickImages =
-    async (
-      useCamera = false
-    ) => {
-      try {
-        let result;
-
-        if (
-          useCamera
-        ) {
-          const permission =
-            await ImagePicker.requestCameraPermissionsAsync();
-
-          if (
-            !permission.granted
-          ) {
-            Alert.alert(
-              'Camera permission',
-              'Camera permission is required to take a photo.'
-            );
-
-            return;
-          }
-
-          result =
-            await ImagePicker.launchCameraAsync(
-              {
-                mediaTypes:
-                  ['images'],
-                quality: 0.85,
-              }
-            );
-        } else {
-          const permission =
-            await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-          if (
-            !permission.granted
-          ) {
-            Alert.alert(
-              'Photo permission',
-              'Photo library permission is required.'
-            );
-
-            return;
-          }
-
-          result =
-            await ImagePicker.launchImageLibraryAsync(
-              {
-                mediaTypes:
-                  ['images'],
-                allowsMultipleSelection:
-                  true,
-                selectionLimit:
-                  10,
-                quality: 0.85,
-              }
-            );
-        }
-
-        if (
-          result.canceled
-        ) {
-          return;
-        }
-
-        /*
-         * IMPORTANT:
-         *
-         * The selected URI is intentionally NOT written
-         * into Firestore as if it were a permanent attachment.
-         *
-         * Your Drive/assetService system needs to upload
-         * this file and return a real shz-SPhXXXXX asset ID
-         * before a message is created.
-         */
-
-        Alert.alert(
-          'Image selected',
-          `${result.assets?.length || 1} image${
-            result.assets?.length === 1
-              ? ''
-              : 's'
-          } selected. Connect the existing Drive asset uploader to create the real attachment message.`
-        );
-      } catch (error) {
-        console.error(
-          'Image picker:',
-          error
-        );
-
-        Alert.alert(
-          'Could not select image',
-          error.message ||
-            'Something went wrong.'
-        );
-      }
-    };
-
-
-  /* =========================================================
-     COMPOSER PANEL
-  ========================================================= */
-
-  const openComposerPanel =
-    (panel) => {
-      setShowComposerMenu(
-        false
-      );
-
-      setComposerPanel(
-        panel
-      );
-    };
-
-
-  /* =========================================================
-     GIF/STICKER
-  ========================================================= */
-
-  const renderGifStickerPanel =
-    () => {
-      if (
-        composerPanel !==
-        'gifSticker'
-      ) {
-        return null;
-      }
-
-      return (
-        <View
-          style={
-            styles.inlinePanel
-          }
-        >
-          <View
-            style={
-              styles.gifTabs
-            }
-          >
-            <TouchableOpacity
-              style={[
-                styles.gifTab,
-                gifStickerMode ===
-                  'gif' &&
-                  styles.gifTabActive,
-              ]}
-              onPress={() =>
-                setGifStickerMode(
-                  'gif'
-                )
-              }
-            >
-              <Text
-                style={
-                  styles.gifTabText
-                }
-              >
-                GIF
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.gifTab,
-                gifStickerMode ===
-                  'sticker' &&
-                  styles.gifTabActive,
-              ]}
-              onPress={() =>
-                setGifStickerMode(
-                  'sticker'
-                )
-              }
-            >
-              <Text
-                style={
-                  styles.gifTabText
-                }
-              >
-                Sticker
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View
-            style={
-              styles.gifCategoryRow
-            }
-          >
-            <TouchableOpacity
-              onPress={() =>
-                setGifStickerCategory(
-                  'normal'
-                )
-              }
-              style={[
-                styles.categoryButton,
-                gifStickerCategory ===
-                  'normal' &&
-                  styles.categoryButtonActive,
-              ]}
-            >
-              <Text
-                style={
-                  styles.categoryText
-                }
-              >
-                Normal
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() =>
-                setGifStickerCategory(
-                  'server'
-                )
-              }
-              style={[
-                styles.categoryButton,
-                gifStickerCategory ===
-                  'server' &&
-                  styles.categoryButtonActive,
-              ]}
-            >
-              <Text
-                style={
-                  styles.categoryText
-                }
-              >
-                Server
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View
-            style={
-              styles.gifSearch
-            }
-          >
-            <Ionicons
-              name="search"
-              size={18}
-              color={
-                COLORS.secondary
-              }
-            />
-
-            <TextInput
-              style={
-                styles.gifSearchInput
-              }
-              placeholder={
-                gifStickerMode ===
-                'gif'
-                  ? 'Search GIFs'
-                  : 'Search stickers'
-              }
-              placeholderTextColor={
-                COLORS.secondary
-              }
-              value={
-                gifStickerSearch
-              }
-              onChangeText={
-                setGifStickerSearch
-              }
-            />
-          </View>
-
-          <View
-            style={
-              styles.gifEmpty
-            }
-          >
-            <Ionicons
-              name={
-                gifStickerMode ===
-                'gif'
-                  ? 'images-outline'
-                  : 'happy-outline'
-              }
-              size={38}
-              color={
-                COLORS.secondary
-              }
-            />
-
-            <Text
-              style={
-                styles.emptyTitle
-              }
-            >
-              {gifStickerCategory ===
-              'server'
-                ? 'Server content'
-                : gifStickerMode ===
-                  'gif'
-                ? 'GIFs'
-                : 'Stickers'}
-            </Text>
-
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              {gifStickerCategory ===
-              'server'
-                ? 'Server GIFs and stickers will appear here when the server system is connected.'
-                : 'GIF and sticker API is intentionally not connected yet.'}
-            </Text>
-          </View>
-        </View>
-      );
-    };
-
-
-  /* =========================================================
-     VOICE MESSAGE UI
-  ========================================================= */
-
-  const startVoiceRecording =
-    () => {
-      setVoiceRecording(
-        true
-      );
-
-      setVoiceDuration(
-        0
-      );
-
-      if (
-        voiceTimerRef.current
-      ) {
-        clearInterval(
-          voiceTimerRef.current
-        );
-      }
-
-      voiceTimerRef.current =
-        setInterval(
-          () => {
-            setVoiceDuration(
-              (
-                value
-              ) =>
-                value + 1
-            );
-          },
-          1000
-        );
-      };
-
-
-  const cancelVoiceRecording =
-    () => {
-      setVoiceRecording(
-        false
-      );
-
-      setVoiceDuration(
-        0
-      );
-
-      if (
-        voiceTimerRef.current
-      ) {
-        clearInterval(
-          voiceTimerRef.current
-        );
-      }
-    };
-
-
-  const sendVoiceMessage =
-    () => {
-      /*
-       * No fake audio message is sent.
-       *
-       * Actual implementation requires:
-       * - microphone permission
-       * - audio recording
-       * - Drive/storage upload
-       * - shz asset record
-       * - message asset reference
-       */
-
-      Alert.alert(
-        'Voice message',
-        'The voice-message UI is ready, but real microphone recording/storage is not connected yet.'
-      );
-
-      cancelVoiceRecording();
-    };
-
+    );
+  }, [selected?.id, uid]);
 
   useEffect(() => {
     return () => {
-      if (
-        voiceTimerRef.current
-      ) {
-        clearInterval(
-          voiceTimerRef.current
-        );
+      if (typingTimer.current) {
+        clearTimeout(typingTimer.current);
       }
 
-      if (
-        typingTimeoutRef.current
-      ) {
-        clearTimeout(
-          typingTimeoutRef.current
-        );
+      if (recordingTimer.current) {
+        clearInterval(recordingTimer.current);
       }
     };
   }, []);
 
+  const selectedConversation = useMemo(
+    () =>
+      conversations.find(
+        item => item.id === selected?.id
+      ) || selected,
+    [conversations, selected]
+  );
 
-  /* =========================================================
-     CALL UI
-  ========================================================= */
+  const unreadCount = useMemo(() => {
+    if (!uid) return 0;
 
-  const startCall =
-    (mode) => {
-      setCallMode(
-        mode
+    return conversations.reduce((total, conversation) => {
+      const lastRead = millis(
+        conversation?.lastReadAt?.[uid]
       );
 
-      setCallParticipants([
+      const lastMessage = millis(
+        conversation?.lastMessageAt
+      );
+
+      if (
+        lastMessage &&
+        lastMessage > lastRead &&
+        conversation?.lastSenderId !== uid
+      ) {
+        return total + 1;
+      }
+
+      return total;
+    }, 0);
+  }, [conversations, uid]);
+
+  const requestCount =
+    friendRequests.length + dmRequests.length;
+
+  const getConversationName = conversation => {
+    if (!conversation) return 'Conversation';
+
+    if (conversation.type === 'group') {
+      return conversation.name || 'Group';
+    }
+
+    const otherId = (conversation.memberIds || []).find(
+      id => id !== uid
+    );
+
+    const member =
+      conversation.memberProfiles?.[otherId];
+
+    return (
+      member?.displayName ||
+      member?.username ||
+      'User'
+    );
+  };
+
+  const getConversationUsername = conversation => {
+    if (!conversation || conversation.type === 'group') {
+      return '';
+    }
+
+    const otherId = (conversation.memberIds || []).find(
+      id => id !== uid
+    );
+
+    return (
+      conversation.memberProfiles?.[otherId]?.username ||
+      ''
+    );
+  };
+
+  const isFavorite = conversation =>
+    Boolean(conversation?.favoriteBy?.[uid]);
+
+  const isUrgent = conversation =>
+    Boolean(conversation?.urgentFor?.[uid]);
+
+  const clearUrgent = async conversation => {
+    if (!uid || !conversation?.id) return;
+
+    try {
+      await updateDoc(
+        doc(db, 'conversations', conversation.id),
         {
-          uid:
-            currentUser?.uid,
-          name:
-            currentProfile?.displayName ||
-            currentProfile?.username ||
-            'You',
-          speaking:
-            false,
+          [`urgentFor.${uid}`]: false,
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Unable to clear urgent state:',
+        error
+      );
+    }
+  };
+
+  const markRead = async conversation => {
+    if (!uid || !conversation?.id) return;
+
+    try {
+      await updateDoc(
+        doc(db, 'conversations', conversation.id),
+        {
+          [`lastReadAt.${uid}`]: serverTimestamp(),
+          [`urgentFor.${uid}`]: false,
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Unable to mark conversation as read:',
+        error
+      );
+    }
+  };
+
+  const openConversation = async conversation => {
+    if (!conversation?.id) return;
+
+    setSelected(conversation);
+    setScreen('conversation');
+    setMessageText('');
+    await markRead(conversation);
+  };
+
+  const openDirectConversation = async otherUser => {
+    if (!uid || !otherUser?.id) return;
+
+    if (otherUser.id === uid) {
+      Alert.alert(
+        'Not available',
+        'You cannot open a direct chat with yourself.'
+      );
+      return;
+    }
+
+    const id = directId(uid, otherUser.id);
+    const conversationRef = doc(
+      db,
+      'conversations',
+      id
+    );
+
+    try {
+      const existing = await getDoc(conversationRef);
+
+      if (!existing.exists()) {
+        const currentMember = {
+          displayName:
+            profile?.displayName ||
+            user?.displayName ||
+            'User',
+          username:
+            profile?.username ||
+            '',
+        };
+
+        const otherMember = {
+          displayName:
+            otherUser.displayName ||
+            otherUser.username ||
+            'User',
+          username:
+            otherUser.username ||
+            '',
+        };
+
+        await setDoc(conversationRef, {
+          type: 'direct',
+          memberIds: [uid, otherUser.id],
+          memberProfiles: {
+            [uid]: currentMember,
+            [otherUser.id]: otherMember,
+          },
+          favoriteBy: {
+            [uid]: false,
+            [otherUser.id]: false,
+          },
+          urgentFor: {
+            [uid]: false,
+            [otherUser.id]: false,
+          },
+          lastReadAt: {
+            [uid]: serverTimestamp(),
+          },
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          lastMessageAt: null,
+          lastMessageText: '',
+          lastSenderId: null,
+        });
+      }
+
+      const snapshot = await getDoc(conversationRef);
+
+      await openConversation({
+        id,
+        ...snapshot.data(),
+      });
+    } catch (error) {
+      console.error(
+        'Unable to open direct conversation:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to open chat',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const publishTyping = async typing => {
+    if (!uid || !selected?.id) return;
+
+    try {
+      await setDoc(
+        doc(
+          db,
+          'conversations',
+          selected.id,
+          'activity',
+          uid
+        ),
+        {
+          uid,
+          typing,
+          updatedAt: serverTimestamp(),
+          expiresAt: new Date(
+            Date.now() + (typing ? 6000 : 1000)
+          ),
         },
-      ]);
-
-      setShowCallScreen(
-        true
+        { merge: true }
       );
-    };
-
-
-  const toggleParticipantMute =
-    (uid) => {
-      setMutedParticipants(
-        (previous) => ({
-          ...previous,
-
-          [uid]:
-            !previous[
-              uid
-            ],
-        })
+    } catch (error) {
+      console.error(
+        'Typing state error:',
+        error
       );
-    };
+    }
+  };
 
+  const handleMessageChange = text => {
+    if (text.length > MAX_MESSAGE_LENGTH) {
+      Alert.alert(
+        'Message too long',
+        `Messages can contain up to ${MAX_MESSAGE_LENGTH} characters.`
+      );
+      return;
+    }
 
-  const endCall =
-    () => {
-      setShowCallScreen(
-        false
+    setMessageText(text);
+
+    if (!selected?.id || !uid) return;
+
+    publishTyping(Boolean(text.trim()));
+
+    if (typingTimer.current) {
+      clearTimeout(typingTimer.current);
+    }
+
+    typingTimer.current = setTimeout(() => {
+      publishTyping(false);
+    }, 5000);
+  };
+
+  const sendMessage = async () => {
+    if (!uid || !selected?.id || sending) return;
+
+    const text = messageText.trim();
+
+    if (!text) return;
+
+    if (text.length > MAX_MESSAGE_LENGTH) {
+      Alert.alert(
+        'Message too long',
+        `Messages can contain up to ${MAX_MESSAGE_LENGTH} characters.`
+      );
+      return;
+    }
+
+    setSending(true);
+
+    try {
+      const memberIds =
+        selected.memberIds || [];
+
+      const urgentFor = {};
+
+      memberIds.forEach(memberId => {
+        if (memberId !== uid) {
+          const username =
+            selected.memberProfiles?.[memberId]
+              ?.username;
+
+          if (mention(text, username)) {
+            urgentFor[memberId] = true;
+          }
+        }
+      });
+
+      const messageRef = await addDoc(
+        collection(
+          db,
+          'conversations',
+          selected.id,
+          'messages'
+        ),
+        {
+          type: 'text',
+          text,
+          senderId: uid,
+          senderName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          senderUsername:
+            profile?.username ||
+            '',
+          createdAt: serverTimestamp(),
+          editedAt: null,
+          deleted: false,
+        }
       );
 
-      setCallParticipants(
-        []
+      const conversationRef = doc(
+        db,
+        'conversations',
+        selected.id
       );
 
-      setMutedParticipants(
-        {}
+      await updateDoc(conversationRef, {
+        lastMessageId: messageRef.id,
+        lastMessageText: text,
+        lastMessageAt: serverTimestamp(),
+        lastSenderId: uid,
+        updatedAt: serverTimestamp(),
+        urgentFor,
+      });
+
+      setMessageText('');
+      await publishTyping(false);
+
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd?.({
+          animated: true,
+        });
+      });
+    } catch (error) {
+      console.error(
+        'Send message error:',
+        error
       );
-    };
 
+      Alert.alert(
+        'Message not sent',
+        error?.message ||
+          'Unable to send this message.'
+      );
+    } finally {
+      setSending(false);
+    }
+  };
 
-  const renderCallScreen =
-    () => {
+  const toggleFavorite = async conversation => {
+    if (!uid || !conversation?.id) return;
+
+    const next = !isFavorite(conversation);
+
+    try {
+      await updateDoc(
+        doc(db, 'conversations', conversation.id),
+        {
+          [`favoriteBy.${uid}`]: next,
+          updatedAt: serverTimestamp(),
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Favorite update error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to update favorite',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const sendFriendRequest = async target => {
+    if (!uid || !target?.id) return;
+
+    if (target.id === uid) {
+      Alert.alert(
+        'Not available',
+        'You cannot send yourself a friend request.'
+      );
+      return;
+    }
+
+    try {
+      const requestId = `${uid}_${target.id}`;
+      const requestRef = doc(
+        db,
+        'friendRequests',
+        requestId
+      );
+
+      const existing = await getDoc(requestRef);
+
       if (
-        !showCallScreen
+        existing.exists() &&
+        existing.data()?.status === 'pending'
       ) {
-        return null;
+        Alert.alert(
+          'Already sent',
+          'A friend request is already pending.'
+        );
+        return;
+      }
+
+      await setDoc(requestRef, {
+        fromUid: uid,
+        toUid: target.id,
+        fromProfile: {
+          displayName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          username:
+            profile?.username ||
+            '',
+        },
+        toProfile: {
+          displayName:
+            target.displayName ||
+            target.username ||
+            'User',
+          username:
+            target.username ||
+            '',
+        },
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      Alert.alert(
+        'Request sent',
+        'Your friend request was sent.'
+      );
+    } catch (error) {
+      console.error(
+        'Friend request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to send request',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const acceptFriendRequest = async request => {
+    if (!uid || !request?.id) return;
+
+    const fromUid = request.fromUid;
+
+    if (!fromUid || fromUid === uid) return;
+
+    try {
+      await runTransaction(db, async transaction => {
+        const requestRef = doc(
+          db,
+          'friendRequests',
+          request.id
+        );
+
+        const senderFriendRef = doc(
+          db,
+          'users',
+          fromUid,
+          'friends',
+          uid
+        );
+
+        const receiverFriendRef = doc(
+          db,
+          'users',
+          uid,
+          'friends',
+          fromUid
+        );
+
+        const requestSnap =
+          await transaction.get(requestRef);
+
+        if (!requestSnap.exists()) {
+          throw new Error(
+            'This friend request no longer exists.'
+          );
+        }
+
+        const data = requestSnap.data();
+
+        if (
+          data.status &&
+          data.status !== 'pending'
+        ) {
+          throw new Error(
+            'This friend request has already been handled.'
+          );
+        }
+
+        transaction.set(
+          senderFriendRef,
+          {
+            uid,
+            username:
+              profile?.username ||
+              '',
+            displayName:
+              profile?.displayName ||
+              profile?.username ||
+              'User',
+            addedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          receiverFriendRef,
+          {
+            uid: fromUid,
+            username:
+              data.fromProfile?.username ||
+              '',
+            displayName:
+              data.fromProfile?.displayName ||
+              data.fromProfile?.username ||
+              'User',
+            addedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        transaction.update(requestRef, {
+          status: 'accepted',
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      Alert.alert(
+        'Friend added',
+        'You are now friends.'
+      );
+    } catch (error) {
+      console.error(
+        'Accept friend request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to accept',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const rejectFriendRequest = async request => {
+    if (!request?.id) return;
+
+    try {
+      await updateDoc(
+        doc(db, 'friendRequests', request.id),
+        {
+          status: 'rejected',
+          updatedAt: serverTimestamp(),
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Reject friend request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to reject',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const sendDMRequest = async target => {
+    if (!uid || !target?.id) return;
+
+    if (target.id === uid) {
+      Alert.alert(
+        'Not available',
+        'You cannot send a DM request to yourself.'
+      );
+      return;
+    }
+
+    try {
+      const requestId = `${uid}_${target.id}`;
+      const requestRef = doc(
+        db,
+        'dmRequests',
+        requestId
+      );
+
+      const existing = await getDoc(requestRef);
+
+      if (
+        existing.exists() &&
+        existing.data()?.status === 'pending'
+      ) {
+        Alert.alert(
+          'Already sent',
+          'A DM request is already pending.'
+        );
+        return;
+      }
+
+      await setDoc(requestRef, {
+        fromUid: uid,
+        toUid: target.id,
+        fromProfile: {
+          displayName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          username:
+            profile?.username ||
+            '',
+        },
+        toProfile: {
+          displayName:
+            target.displayName ||
+            target.username ||
+            'User',
+          username:
+            target.username ||
+            '',
+        },
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      Alert.alert(
+        'DM request sent',
+        'Your request was sent.'
+      );
+    } catch (error) {
+      console.error(
+        'DM request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to send DM request',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const acceptDMRequest = async request => {
+    if (!uid || !request?.id) return;
+
+    const fromUid = request.fromUid;
+
+    if (!fromUid || fromUid === uid) return;
+
+    const conversationId = directId(
+      uid,
+      fromUid
+    );
+
+    try {
+      await runTransaction(db, async transaction => {
+        const requestRef = doc(
+          db,
+          'dmRequests',
+          request.id
+        );
+
+        const conversationRef = doc(
+          db,
+          'conversations',
+          conversationId
+        );
+
+        const requestSnap =
+          await transaction.get(requestRef);
+
+        if (!requestSnap.exists()) {
+          throw new Error(
+            'This DM request no longer exists.'
+          );
+        }
+
+        const data = requestSnap.data();
+
+        if (
+          data.status &&
+          data.status !== 'pending'
+        ) {
+          throw new Error(
+            'This DM request has already been handled.'
+          );
+        }
+
+        const conversationSnap =
+          await transaction.get(conversationRef);
+
+        if (!conversationSnap.exists()) {
+          transaction.set(conversationRef, {
+            type: 'direct',
+            memberIds: [uid, fromUid],
+            memberProfiles: {
+              [uid]: {
+                displayName:
+                  profile?.displayName ||
+                  profile?.username ||
+                  'User',
+                username:
+                  profile?.username ||
+                  '',
+              },
+              [fromUid]: {
+                displayName:
+                  data.fromProfile?.displayName ||
+                  data.fromProfile?.username ||
+                  'User',
+                username:
+                  data.fromProfile?.username ||
+                  '',
+              },
+            },
+            favoriteBy: {
+              [uid]: false,
+              [fromUid]: false,
+            },
+            urgentFor: {
+              [uid]: false,
+              [fromUid]: false,
+            },
+            lastReadAt: {
+              [uid]: serverTimestamp(),
+            },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastMessageAt: null,
+            lastMessageText: '',
+            lastSenderId: null,
+          });
+        }
+
+        transaction.update(requestRef, {
+          status: 'accepted',
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      Alert.alert(
+        'DM request accepted',
+        'The conversation is ready.'
+      );
+    } catch (error) {
+      console.error(
+        'Accept DM request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to accept DM request',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const rejectDMRequest = async request => {
+    if (!request?.id) return;
+
+    try {
+      await updateDoc(
+        doc(db, 'dmRequests', request.id),
+        {
+          status: 'rejected',
+          updatedAt: serverTimestamp(),
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Reject DM request error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to reject',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const searchUser = async () => {
+    const username = search.trim().toLowerCase();
+
+    if (!username) {
+      setSearchResult(null);
+      return;
+    }
+
+    setSearching(true);
+
+    try {
+      const usernameSnap = await getDoc(
+        doc(db, 'usernames', username)
+      );
+
+      if (!usernameSnap.exists()) {
+        setSearchResult(null);
+        Alert.alert(
+          'Not found',
+          'No user was found with that username.'
+        );
+        return;
+      }
+
+      const targetUid =
+        usernameSnap.data()?.uid;
+
+      if (!targetUid) {
+        setSearchResult(null);
+        return;
+      }
+
+      if (targetUid === uid) {
+        setSearchResult({
+          id: targetUid,
+          ...(profile || {}),
+        });
+        return;
+      }
+
+      const userSnap = await getDoc(
+        doc(db, 'users', targetUid)
+      );
+
+      if (!userSnap.exists()) {
+        setSearchResult(null);
+        Alert.alert(
+          'Not found',
+          'That user profile could not be loaded.'
+        );
+        return;
+      }
+
+      setSearchResult({
+        id: userSnap.id,
+        ...userSnap.data(),
+      });
+    } catch (error) {
+      console.error(
+        'User search error:',
+        error
+      );
+
+      Alert.alert(
+        'Search failed',
+        error?.message ||
+          'Unable to search right now.'
+      );
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const createGroup = async () => {
+    if (!uid) return;
+
+    const name = groupName.trim();
+
+    if (!name) {
+      Alert.alert(
+        'Group name required',
+        'Please enter a group name.'
+      );
+      return;
+    }
+
+    const selectedFriends = friends.filter(
+      friend => groupSelected[friend.id]
+    );
+
+    if (!selectedFriends.length) {
+      Alert.alert(
+        'Add friends',
+        'Select at least one friend.'
+      );
+      return;
+    }
+
+    setCreatingPoll(false);
+
+    try {
+      const memberIds = [
+        uid,
+        ...selectedFriends.map(friend => friend.id),
+      ];
+
+      const memberProfiles = {
+        [uid]: {
+          displayName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          username:
+            profile?.username ||
+            '',
+        },
+      };
+
+      selectedFriends.forEach(friend => {
+        memberProfiles[friend.id] = {
+          displayName:
+            friend.displayName ||
+            friend.username ||
+            'User',
+          username:
+            friend.username ||
+            '',
+        };
+      });
+
+      const favoriteBy = {};
+      const urgentFor = {};
+      const lastReadAt = {};
+
+      memberIds.forEach(memberId => {
+        favoriteBy[memberId] = false;
+        urgentFor[memberId] = false;
+        lastReadAt[memberId] = null;
+      });
+
+      lastReadAt[uid] = serverTimestamp();
+
+      const conversationRef = await addDoc(
+        collection(db, 'conversations'),
+        {
+          type: 'group',
+          name,
+          description:
+            groupDescription.trim(),
+          memberIds,
+          memberProfiles,
+          favoriteBy,
+          urgentFor,
+          lastReadAt,
+          createdBy: uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          lastMessageAt: null,
+          lastMessageText: '',
+          lastSenderId: null,
+        }
+      );
+
+      const snapshot = await getDoc(
+        conversationRef
+      );
+
+      setShowGroup(false);
+      setGroupName('');
+      setGroupDescription('');
+      setGroupSelected({});
+
+      await openConversation({
+        id: conversationRef.id,
+        ...snapshot.data(),
+      });
+    } catch (error) {
+      console.error(
+        'Create group error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to create group',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const addPollOption = () => {
+    if (pollOptions.length >= MAX_POLL_OPTIONS) {
+      Alert.alert(
+        'Limit reached',
+        `A poll can have up to ${MAX_POLL_OPTIONS} options.`
+      );
+      return;
+    }
+
+    setPollOptions(options => [
+      ...options,
+      '',
+    ]);
+  };
+
+  const updatePollOption = (index, value) => {
+    setPollOptions(options =>
+      options.map((option, i) =>
+        i === index ? value : option
+      )
+    );
+  };
+
+  const removePollOption = index => {
+    if (pollOptions.length <= 2) {
+      Alert.alert(
+        'Poll needs options',
+        'A poll needs at least two options.'
+      );
+      return;
+    }
+
+    setPollOptions(options =>
+      options.filter((_, i) => i !== index)
+    );
+  };
+
+  const createPoll = async () => {
+    if (!uid || !selected?.id || creatingPoll) {
+      return;
+    }
+
+    const question = pollQuestion.trim();
+
+    const options = pollOptions
+      .map(option => option.trim())
+      .filter(Boolean);
+
+    if (!question) {
+      Alert.alert(
+        'Question required',
+        'Enter a poll question.'
+      );
+      return;
+    }
+
+    if (options.length < 2) {
+      Alert.alert(
+        'More options required',
+        'Add at least two poll options.'
+      );
+      return;
+    }
+
+    setCreatingPoll(true);
+
+    try {
+      await addDoc(
+        collection(
+          db,
+          'conversations',
+          selected.id,
+          'messages'
+        ),
+        {
+          type: 'poll',
+          question,
+          description:
+            pollDescription.trim(),
+          options,
+          votes: Object.fromEntries(
+            options.map((_, index) => [
+              index,
+              0,
+            ])
+          ),
+          voters: {},
+          senderId: uid,
+          senderName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          senderUsername:
+            profile?.username ||
+            '',
+          createdAt: serverTimestamp(),
+          deleted: false,
+        }
+      );
+
+      await updateDoc(
+        doc(db, 'conversations', selected.id),
+        {
+          lastMessageText: `Poll: ${question}`,
+          lastMessageAt: serverTimestamp(),
+          lastSenderId: uid,
+          updatedAt: serverTimestamp(),
+        }
+      );
+
+      setPollQuestion('');
+      setPollDescription('');
+      setPollOptions(['', '']);
+      setPanel(null);
+    } catch (error) {
+      console.error(
+        'Create poll error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to create poll',
+        error?.message ||
+          'Please try again.'
+      );
+    } finally {
+      setCreatingPoll(false);
+    }
+  };
+
+  const votePoll = async (message, optionIndex) => {
+    if (
+      !uid ||
+      !selected?.id ||
+      !message?.id
+    ) {
+      return;
+    }
+
+    try {
+      await runTransaction(db, async transaction => {
+        const messageRef = doc(
+          db,
+          'conversations',
+          selected.id,
+          'messages',
+          message.id
+        );
+
+        const snap =
+          await transaction.get(messageRef);
+
+        if (!snap.exists()) {
+          throw new Error(
+            'This poll no longer exists.'
+          );
+        }
+
+        const data = snap.data();
+
+        if (data.type !== 'poll') {
+          throw new Error(
+            'This message is not a poll.'
+          );
+        }
+
+        const voters = {
+          ...(data.voters || {}),
+        };
+
+        const votes = {
+          ...(data.votes || {}),
+        };
+
+        const previousVote = voters[uid];
+
+        if (
+          previousVote !== undefined &&
+          previousVote !== null
+        ) {
+          const oldIndex =
+            Number(previousVote);
+
+          votes[oldIndex] = Math.max(
+            0,
+            Number(votes[oldIndex] || 0) - 1
+          );
+        }
+
+        const alreadySelected =
+          Number(previousVote) ===
+          Number(optionIndex);
+
+        if (alreadySelected) {
+          delete voters[uid];
+        } else {
+          voters[uid] = optionIndex;
+          votes[optionIndex] =
+            Number(votes[optionIndex] || 0) + 1;
+        }
+
+        transaction.update(messageRef, {
+          voters,
+          votes,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      console.error(
+        'Vote poll error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to vote',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const createEvent = async () => {
+    if (
+      !uid ||
+      !selected?.id ||
+      creatingEvent
+    ) {
+      return;
+    }
+
+    const name = eventName.trim();
+
+    if (!name) {
+      Alert.alert(
+        'Event name required',
+        'Enter an event name.'
+      );
+      return;
+    }
+
+    setCreatingEvent(true);
+
+    try {
+      await addDoc(
+        collection(
+          db,
+          'conversations',
+          selected.id,
+          'messages'
+        ),
+        {
+          type: 'event',
+          name,
+          description:
+            eventDescription.trim(),
+          start:
+            eventStart.trim(),
+          end:
+            eventEnd.trim(),
+          attendees: {},
+          senderId: uid,
+          senderName:
+            profile?.displayName ||
+            profile?.username ||
+            'User',
+          senderUsername:
+            profile?.username ||
+            '',
+          createdAt: serverTimestamp(),
+          deleted: false,
+        }
+      );
+
+      await updateDoc(
+        doc(db, 'conversations', selected.id),
+        {
+          lastMessageText: `Event: ${name}`,
+          lastMessageAt: serverTimestamp(),
+          lastSenderId: uid,
+          updatedAt: serverTimestamp(),
+        }
+      );
+
+      setEventName('');
+      setEventDescription('');
+      setEventStart('');
+      setEventEnd('');
+      setPanel(null);
+    } catch (error) {
+      console.error(
+        'Create event error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to create event',
+        error?.message ||
+          'Please try again.'
+      );
+    } finally {
+      setCreatingEvent(false);
+    }
+  };
+
+  const toggleEventAttendance = async message => {
+    if (
+      !uid ||
+      !selected?.id ||
+      !message?.id
+    ) {
+      return;
+    }
+
+    try {
+      await runTransaction(db, async transaction => {
+        const messageRef = doc(
+          db,
+          'conversations',
+          selected.id,
+          'messages',
+          message.id
+        );
+
+        const snap =
+          await transaction.get(messageRef);
+
+        if (!snap.exists()) {
+          throw new Error(
+            'This event no longer exists.'
+          );
+        }
+
+        const data = snap.data();
+
+        if (data.type !== 'event') {
+          throw new Error(
+            'This message is not an event.'
+          );
+        }
+
+        const attendees = {
+          ...(data.attendees || {}),
+        };
+
+        if (attendees[uid]) {
+          delete attendees[uid];
+        } else {
+          attendees[uid] = {
+            uid,
+            joinedAt: new Date().toISOString(),
+          };
+        }
+
+        transaction.update(messageRef, {
+          attendees,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      console.error(
+        'Event attendance error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to update attendance',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const pickImage = async () => {
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission required',
+          'Photo library permission is required to select media.'
+        );
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 0.85,
+        });
+
+      if (
+        result.canceled ||
+        !result.assets?.length
+      ) {
+        return;
+      }
+
+      Alert.alert(
+        'Attachment selected',
+        'The media picker works, but permanent Drive upload and message attachment delivery are not enabled yet.'
+      );
+    } catch (error) {
+      console.error(
+        'Image picker error:',
+        error
+      );
+
+      Alert.alert(
+        'Unable to select image',
+        error?.message ||
+          'Please try again.'
+      );
+    }
+  };
+
+  const startRecordingUI = () => {
+    if (recording) {
+      setRecording(false);
+
+      if (recordingTimer.current) {
+        clearInterval(recordingTimer.current);
+        recordingTimer.current = null;
+      }
+
+      Alert.alert(
+        'Voice recording',
+        'The voice-recording UI stopped. Real audio recording and Drive upload are not implemented yet.'
+      );
+
+      return;
+    }
+
+    setRecordSeconds(0);
+    setRecording(true);
+
+    recordingTimer.current =
+      setInterval(() => {
+        setRecordSeconds(seconds => {
+          if (seconds >= 3599) {
+            clearInterval(
+              recordingTimer.current
+            );
+            recordingTimer.current = null;
+            setRecording(false);
+            return seconds;
+          }
+
+          return seconds + 1;
+        });
+      }, 1000);
+  };
+
+  const formatDuration = seconds => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+
+    return `${String(mins).padStart(2, '0')}:${String(
+      secs
+    ).padStart(2, '0')}`;
+  };
+
+  const startCallUI = mode => {
+    setCallMode(mode);
+    setShowCall(true);
+  };
+
+  const filteredConversations = useMemo(() => {
+    let rows = [...conversations];
+
+    if (activeTab === 'Recent') {
+      rows = rows
+        .filter(item => millis(item.lastMessageAt))
+        .sort(
+          (a, b) =>
+            millis(b.lastMessageAt) -
+            millis(a.lastMessageAt)
+        );
+    }
+
+    if (activeTab === 'Urgent') {
+      rows = rows.filter(isUrgent);
+    }
+
+    if (activeTab === 'Favorite') {
+      rows = rows.filter(isFavorite);
+    }
+
+    if (activeTab === 'Groups') {
+      rows = rows.filter(
+        item => item.type === 'group'
+      );
+    }
+
+    const queryText =
+      search.trim().toLowerCase();
+
+    if (queryText) {
+      rows = rows.filter(item => {
+        const name =
+          getConversationName(item)
+            .toLowerCase();
+
+        const username =
+          getConversationUsername(item)
+            .toLowerCase();
+
+        const preview =
+          String(
+            item.lastMessageText || ''
+          ).toLowerCase();
+
+        return (
+          name.includes(queryText) ||
+          username.includes(queryText) ||
+          preview.includes(queryText)
+        );
+      });
+    }
+
+    rows.sort((a, b) => {
+      const favoriteDifference =
+        Number(isFavorite(b)) -
+        Number(isFavorite(a));
+
+      if (
+        favoriteDifference !== 0 &&
+        activeTab !== 'Favorite'
+      ) {
+        return favoriteDifference;
       }
 
       return (
-        <Modal
-          visible={
-            showCallScreen
-          }
-          animationType="slide"
-          onRequestClose={
-            endCall
-          }
-        >
-          <SafeAreaView
-            style={
-              styles.callScreen
-            }
-          >
-            <View
-              style={
-                styles.callHeader
-              }
-            >
-              <Text
-                style={
-                  styles.callTitle
-                }
-              >
-                {callMode ===
-                'video'
-                  ? 'Video call'
-                  : 'Voice call'}
-              </Text>
-
-              <Text
-                style={
-                  styles.callParticipantsCount
-                }
-              >
-                {
-                  callParticipants.length
-                }{' '}
-                participant
-                {callParticipants.length ===
-                1
-                  ? ''
-                  : 's'}
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.participantGrid
-              }
-            >
-              {callParticipants.map(
-                (
-                  participant
-                ) => {
-                  const muted =
-                    mutedParticipants[
-                      participant.uid
-                    ];
-
-                  return (
-                    <View
-                      key={
-                        participant.uid
-                      }
-                      style={
-                        styles.participantCard
-                      }
-                    >
-                      <Avatar
-                        name={
-                          participant.name
-                        }
-                      />
-
-                      <Text
-                        style={
-                          styles.participantName
-                        }
-                      >
-                        {
-                          participant.name
-                        }
-                      </Text>
-
-                      <View
-                        style={
-                          styles.voiceActivity
-                        }
-                      >
-                        <Ionicons
-                          name={
-                            muted
-                              ? 'mic-off'
-                              : 'mic'
-                          }
-                          size={
-                            17
-                          }
-                          color={
-                            muted
-                              ? COLORS.red
-                              : COLORS.green
-                          }
-                        />
-
-                        {!muted &&
-                          participant.speaking && (
-                            <View
-                              style={
-                                styles.voiceBars
-                              }
-                            >
-                              <View
-                                style={
-                                  styles.voiceBar
-                                }
-                              />
-                              <View
-                                style={
-                                  styles.voiceBar
-                                }
-                              />
-                              <View
-                                style={
-                                  styles.voiceBar
-                                }
-                              />
-                            </View>
-                          )}
-                      </View>
-
-                      <TouchableOpacity
-                        style={
-                          styles.muteParticipantButton
-                        }
-                        onPress={() =>
-                          toggleParticipantMute(
-                            participant.uid
-                          )
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.buttonText
-                          }
-                        >
-                          {muted
-                            ? 'Unmute'
-                            : 'Mute'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                }
-              )}
-            </View>
-
-            <View
-              style={
-                styles.callOutputRow
-              }
-            >
-              {[
-                'Mobile',
-                'Speaker',
-                'Device',
-              ].map(
-                (
-                  output
-                ) => (
-                  <TouchableOpacity
-                    key={
-                      output
-                    }
-                    style={[
-                      styles.outputButton,
-                      callOutput ===
-                        output &&
-                        styles.outputButtonActive,
-                    ]}
-                    onPress={() =>
-                      setCallOutput(
-                        output
-                      )
-                    }
-                  >
-                    <Ionicons
-                      name={
-                        output ===
-                        'Mobile'
-                          ? 'phone-portrait-outline'
-                          : output ===
-                            'Speaker'
-                          ? 'volume-high-outline'
-                          : 'headset-outline'
-                      }
-                      size={
-                        18
-                      }
-                      color={
-                        COLORS.text
-                      }
-                    />
-
-                    <Text
-                      style={
-                        styles.outputText
-                      }
-                    >
-                      {
-                        output
-                      }
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )}
-            </View>
-
-            <View
-              style={
-                styles.callControls
-              }
-            >
-              <TouchableOpacity
-                style={
-                  styles.callControl
-                }
-                onPress={() =>
-                  Alert.alert(
-                    'Add participant',
-                    'Friend selection for live calls will connect when call signaling is implemented.'
-                  )
-                }
-              >
-                <Ionicons
-                  name="person-add"
-                  size={23}
-                  color={
-                    COLORS.text
-                  }
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={
-                  styles.callControl
-                }
-                onPress={() =>
-                  setCallMode(
-                    callMode ===
-                      'voice'
-                      ? 'video'
-                      : 'voice'
-                  )
-                }
-              >
-                <Ionicons
-                  name={
-                    callMode ===
-                    'voice'
-                      ? 'videocam'
-                      : 'mic'
-                  }
-                  size={23}
-                  color={
-                    COLORS.text
-                  }
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.callControl,
-                  styles.endCall,
-                ]}
-                onPress={
-                  endCall
-                }
-              >
-                <Ionicons
-                  name="call"
-                  size={23}
-                  color={
-                    COLORS.text
-                  }
-                />
-              </TouchableOpacity>
-            </View>
-
-            <Text
-              style={
-                styles.callNotice
-              }
-            >
-              Call interface ready. Real-time voice/video
-              transport and signaling are not connected yet.
-            </Text>
-          </SafeAreaView>
-        </Modal>
+        millis(b.lastMessageAt || b.updatedAt) -
+        millis(a.lastMessageAt || a.updatedAt)
       );
-    };
+    });
 
+    return rows;
+  }, [
+    conversations,
+    activeTab,
+    search,
+    uid,
+  ]);
 
-  /* =========================================================
-     POLL CREATOR
-  ========================================================= */
+  const goBack = () => {
+    if (screen === 'conversation') {
+      setSelected(null);
+      setScreen('main');
+      setMessageText('');
+      setPanel(null);
+      return;
+    }
 
-  const renderPollCreator =
-    () => {
-      if (
-        composerPanel !==
-        'poll'
-      ) {
-        return null;
+    if (
+      screen === 'friends' ||
+      screen === 'friendRequests' ||
+      screen === 'dmRequests' ||
+      screen === 'search'
+    ) {
+      setScreen('main');
+      return;
+    }
+
+    if (onNavigate) {
+      onNavigate('profile');
+    }
+  };
+
+  const renderBackHeader = (
+    title,
+    right = null
+  ) => (
+    <View style={styles.backHeader}>
+      <TouchableOpacity
+        style={styles.iconButton}
+        onPress={goBack}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+      >
+        <Ionicons
+          name="arrow-back"
+          size={23}
+          color={COLORS.text}
+        />
+      </TouchableOpacity>
+
+      <Text
+        style={styles.backHeaderTitle}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+
+      <View style={styles.backHeaderRight}>
+        {right}
+      </View>
+    </View>
+  );
+
+  const renderModesModal = () => (
+    <Modal
+      visible={showModes}
+      transparent
+      animationType="fade"
+      onRequestClose={() =>
+        setShowModes(false)
       }
-
-      return (
-        <View
-          style={
-            styles.inlinePanel
-          }
-        >
-          <View
-            style={
-              styles.panelHeader
-            }
-          >
-            <Text
-              style={
-                styles.panelTitle
-              }
-            >
-              Create Poll
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modeModal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Modes
             </Text>
 
             <TouchableOpacity
               onPress={() =>
-                setComposerPanel(
-                  null
-                )
+                setShowModes(false)
               }
             >
               <Ionicons
                 name="close"
-                size={23}
-                color={
-                  COLORS.text
-                }
+                size={25}
+                color={COLORS.text}
               />
             </TouchableOpacity>
           </View>
-
-          <TextInput
-            style={
-              styles.panelInput
-            }
-            placeholder="Question"
-            placeholderTextColor={
-              COLORS.secondary
-            }
-            value={
-              pollQuestion
-            }
-            onChangeText={
-              setPollQuestion
-            }
-            maxLength={
-              250
-            }
-          />
-
-          <TextInput
-            style={[
-              styles.panelInput,
-              styles.multilineInput,
-            ]}
-            placeholder="Description (optional)"
-            placeholderTextColor={
-              COLORS.secondary
-            }
-            value={
-              pollDescription
-            }
-            onChangeText={
-              setPollDescription
-            }
-            multiline
-            maxLength={
-              500
-            }
-          />
-
-          <Text
-            style={
-              styles.sectionTitle
-            }
-          >
-            Options
-          </Text>
-
-          <ScrollView
-            style={
-              styles.optionScroll
-            }
-          >
-            {pollOptions.map(
-              (
-                option,
-                index
-              ) => (
-                <View
-                  key={
-                    index
-                  }
-                  style={
-                    styles.optionRow
-                  }
-                >
-                  <TextInput
-                    style={
-                      styles.optionInput
-                    }
-                    placeholder={`Option ${
-                      index + 1
-                    }`}
-                    placeholderTextColor={
-                      COLORS.secondary
-                    }
-                    value={
-                      option
-                    }
-                    onChangeText={(
-                      value
-                    ) =>
-                      updatePollOption(
-                        index,
-                        value
-                      )
-                    }
-                    maxLength={
-                      100
-                    }
-                  />
-
-                  {pollOptions.length >
-                    2 && (
-                    <TouchableOpacity
-                      onPress={() =>
-                        removePollOption(
-                          index
-                        )
-                      }
-                    >
-                      <Ionicons
-                        name="close-circle"
-                        size={
-                          22
-                        }
-                        color={
-                          COLORS.red
-                        }
-                      />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )
-            )}
-          </ScrollView>
-
-          {pollOptions.length <
-            MAX_POLL_OPTIONS && (
-            <TouchableOpacity
-              style={
-                styles.addOptionButton
-              }
-              onPress={
-                addPollOption
-              }
-            >
-              <Ionicons
-                name="add"
-                size={18}
-                color={
-                  COLORS.blue
-                }
-              />
-
-              <Text
-                style={
-                  styles.addOptionText
-                }
-              >
-                Add option
-              </Text>
-            </TouchableOpacity>
-          )}
 
           <TouchableOpacity
-            style={
-              styles.primaryButton
-            }
-            disabled={
-              creatingPoll
-            }
-            onPress={
-              createPoll
+            style={styles.modeRow}
+            onPress={() =>
+              Alert.alert(
+                'Social mode',
+                'Social/content mode is selected.'
+              )
             }
           >
-            {creatingPoll ? (
-              <ActivityIndicator
-                color={
-                  COLORS.text
+            <View style={styles.modeIcon}>
+              <Ionicons
+                name="people-outline"
+                size={24}
+                color={COLORS.blueBright}
               />
-            ) : (
-              <Text
-                style={
-                  styles.primaryButtonText
-                }
-              >
-                Send Poll
+            </View>
+
+            <View style={styles.modeTextWrap}>
+              <Text style={styles.modeTitle}>
+                Social
               </Text>
-            )}
+
+              <Text style={styles.modeSubtitle}>
+                Chats, friends and social activity
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.modeRow}
+            onPress={() =>
+              Alert.alert(
+                'Games mode',
+                'Games mode UI is reserved for the future Games system.'
+              )
+            }
+          >
+            <View style={styles.modeIcon}>
+              <Ionicons
+                name="game-controller-outline"
+                size={24}
+                color={COLORS.green}
+              />
+            </View>
+
+            <View style={styles.modeTextWrap}>
+              <Text style={styles.modeTitle}>
+                Games
+              </Text>
+
+              <Text style={styles.modeSubtitle}>
+                Game-related activity
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.modeRow}
+            onPress={() => {
+              setShowModes(false);
+              setScreen('search');
+            }}
+          >
+            <View style={styles.modeIcon}>
+              <Ionicons
+                name="search-outline"
+                size={24}
+                color={COLORS.yellow}
+              />
+            </View>
+
+            <View style={styles.modeTextWrap}>
+              <Text style={styles.modeTitle}>
+                Search
+              </Text>
+
+              <Text style={styles.modeSubtitle}>
+                Find users by username
+              </Text>
+            </View>
           </TouchableOpacity>
         </View>
-      );
-    };
+      </View>
+    </Modal>
+  );
 
-
-  /* =========================================================
-     EVENT CREATOR
-  ========================================================= */
-
-  const renderEventCreator =
-    () => {
-      if (
-        composerPanel !==
-        'event'
-      ) {
-        return null;
+  const renderGroupModal = () => (
+    <Modal
+      visible={showGroup}
+      transparent
+      animationType="slide"
+      onRequestClose={() =>
+        setShowGroup(false)
       }
-
-      return (
-        <View
-          style={
-            styles.inlinePanel
-          }
-        >
-          <View
-            style={
-              styles.panelHeader
-            }
-          >
-            <Text
-              style={
-                styles.panelTitle
-              }
-            >
-              Create Event
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.groupModal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Create Group
             </Text>
 
             <TouchableOpacity
               onPress={() =>
-                setComposerPanel(
-                  null
-                )
+                setShowGroup(false)
               }
             >
               <Ionicons
                 name="close"
-                size={23}
-                color={
-                  COLORS.text
-                }
+                size={25}
+                color={COLORS.text}
               />
             </TouchableOpacity>
           </View>
 
           <TextInput
-            style={
-              styles.panelInput
-            }
-            placeholder="Event name"
+            style={styles.modalInput}
+            placeholder="Group name"
             placeholderTextColor={
               COLORS.secondary
             }
-            value={
-              eventName
-            }
-            onChangeText={
-              setEventName
-            }
-            maxLength={
-              100
-            }
+            value={groupName}
+            onChangeText={setGroupName}
+            maxLength={60}
           />
 
           <TextInput
             style={[
-              styles.panelInput,
+              styles.modalInput,
               styles.multilineInput,
             ]}
             placeholder="Description"
             placeholderTextColor={
               COLORS.secondary
             }
-            value={
-              eventDescription
-            }
-            onChangeText={
-              setEventDescription
-            }
+            value={groupDescription}
+            onChangeText={setGroupDescription}
             multiline
-            maxLength={
-              500
-            }
+            maxLength={300}
           />
 
-          <TextInput
-            style={
-              styles.panelInput
-            }
-            placeholder="Start time"
-            placeholderTextColor={
-              COLORS.secondary
-            }
-            value={
-              eventStart
-            }
-            onChangeText={
-              setEventStart
-            }
-            maxLength={
-              100
-            }
-          />
+          <Text style={styles.sectionLabel}>
+            Add friends
+          </Text>
 
-          <TextInput
-            style={
-              styles.panelInput
-            }
-            placeholder="End time (optional)"
-            placeholderTextColor={
-              COLORS.secondary
-            }
-            value={
-              eventEnd
-            }
-            onChangeText={
-              setEventEnd
-            }
-            maxLength={
-              100
-            }
-          />
-
-          <TouchableOpacity
-            style={
-              styles.advancedButton
-            }
-            onPress={() =>
-              Alert.alert(
-                'Advanced settings',
-                'Advanced event settings are reserved for the next event-system phase.'
-              )
-            }
+          <ScrollView
+            style={styles.friendPicker}
+            keyboardShouldPersistTaps="handled"
           >
-            <Text
-              style={
-                styles.advancedText
-              }
-            >
-              Advanced settings
-            </Text>
-
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={
-                COLORS.secondary
-              }
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={
-              styles.primaryButton
-            }
-            disabled={
-              creatingEvent
-            }
-            onPress={
-              createEvent
-            }
-          >
-            {creatingEvent ? (
-              <ActivityIndicator
-                color={
-                  COLORS.text
-                }
+            {friends.length === 0 ? (
+              <EmptyState
+                icon="people-outline"
+                title="No friends yet"
+                text="Add friends before creating a group."
               />
             ) : (
-              <Text
-                style={
-                  styles.primaryButtonText
-                }
-              >
-                Create Event
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      );
-    };
+              friends.map(friend => {
+                const added =
+                  Boolean(
+                    groupSelected[friend.id]
+                  );
 
-
-  /* =========================================================
-     MESSAGE RENDERERS
-  ========================================================= */
-
-  const renderPollMessage =
-    (
-      message,
-      mine
-    ) => {
-      const poll =
-        message.poll;
-
-      if (!poll) {
-        return null;
-      }
-
-      const myVote =
-        poll.voters?.[
-          currentUser?.uid
-        ];
-
-      return (
-        <View
-          style={
-            styles.pollCard
-          }
-        >
-          <View
-            style={
-              styles.pollHeader
-            }
-          >
-            <Ionicons
-              name="stats-chart"
-              size={19}
-              color={
-                COLORS.blue
-              }
-            />
-
-            <Text
-              style={
-                styles.pollTitle
-              }
-            >
-              POLL
-            </Text>
-          </View>
-
-          <Text
-            style={
-              styles.pollQuestion
-            }
-          >
-            {
-              poll.question
-            }
-          </Text>
-
-          {!!poll.description && (
-            <Text
-              style={
-                styles.pollDescription
-              }
-            >
-              {
-                poll.description
-              }
-            </Text>
-          )}
-
-          {(
-            poll.options ||
-            []
-          ).map(
-            (
-              option,
-              index
-            ) => {
-              const percentage =
-                getPollPercentage(
-                  poll,
-                  index
-                );
-
-              const selected =
-                myVote ===
-                index;
-
-              return (
-                <TouchableOpacity
-                  key={
-                    `${message.id}_${index}`
-                  }
-                  style={[
-                    styles.pollOption,
-                    selected &&
-                      styles.pollOptionSelected,
-                  ]}
-                  onPress={() =>
-                    votePoll(
-                      message,
-                      index
-                    )
-                  }
-                >
-                  <View
-                    style={
-                      styles.pollOptionTop
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.pollOptionText
-                      }
-                    >
-                      {
-                        option
-                      }
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.pollPercentage
-                      }
-                    >
-                      {
-                        percentage
-                      }%
-                    </Text>
-                  </View>
-
-                  <View
-                    style={
-                      styles.pollProgress
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.pollProgressFill,
-                        {
-                          width: `${percentage}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-              );
-            }
-          )}
-
-          <Text
-            style={
-              styles.pollVotes
-            }
-          >
-            {
-              getPollTotalVotes(
-                poll
-              )
-            }{' '}
-            vote
-            {getPollTotalVotes(
-              poll
-            ) === 1
-              ? ''
-              : 's'}
-          </Text>
-        </View>
-      );
-    };
-
-
-  const renderEventMessage =
-    (
-      message
-    ) => {
-      const event =
-        message.event;
-
-      if (!event) {
-        return null;
-      }
-
-      const participants =
-        Object.values(
-          event.participants ||
-            {}
-        );
-
-      const joined =
-        !!event.participants?.[
-          currentUser?.uid
-        ];
-
-      return (
-        <View
-          style={
-            styles.eventCard
-          }
-        >
-          <View
-            style={
-              styles.eventHeader
-            }
-          >
-            <Ionicons
-              name="calendar"
-              size={20}
-              color={
-                COLORS.blue
-              }
-            />
-
-            <Text
-              style={
-                styles.eventLabel
-              }
-            >
-              EVENT
-            </Text>
-          </View>
-
-          <Text
-            style={
-              styles.eventName
-            }
-          >
-            {
-              event.name
-            }
-          </Text>
-
-          {!!event.description && (
-            <Text
-              style={
-                styles.eventDescription
-              }
-            >
-              {
-                event.description
-              }
-            </Text>
-          )}
-
-          {!!event.startTime && (
-            <View
-              style={
-                styles.eventInfoRow
-              }
-            >
-              <Ionicons
-                name="time-outline"
-                size={17}
-                color={
-                  COLORS.secondary
-                }
-              />
-
-              <Text
-                style={
-                  styles.eventInfoText
-                }
-              >
-                {
-                  event.startTime
-                }
-              </Text>
-            </View>
-          )}
-
-          {!!event.endTime && (
-            <View
-              style={
-                styles.eventInfoRow
-              }
-            >
-              <Ionicons
-                name="time-outline"
-                size={17}
-                color={
-                  COLORS.secondary
-                }
-              />
-
-              <Text
-                style={
-                  styles.eventInfoText
-                }
-              >
-                Ends: {
-                  event.endTime
-                }
-              </Text>
-            </View>
-          )}
-
-          <View
-            style={
-              styles.eventParticipants
-            }
-          >
-            <Text
-              style={
-                styles.eventParticipantsTitle
-              }
-            >
-              {
-                participants.length
-              }{' '}
-              joined
-            </Text>
-
-            {participants
-              .slice(
-                0,
-                5
-              )
-              .map(
-                (
-                  participant
-                ) => (
-                  <View
-                    key={
-                      participant.uid
-                    }
-                    style={
-                      styles.eventParticipant
+                return (
+                  <TouchableOpacity
+                    key={friend.id}
+                    style={styles.friendPickerRow}
+                    onPress={() =>
+                      setGroupSelected(
+                        current => ({
+                          ...current,
+                          [friend.id]: !current[
+                            friend.id
+                          ],
+                        })
+                      )
                     }
                   >
                     <Avatar
                       name={
-                        participant.displayName ||
-                        participant.username
+                        friend.displayName ||
+                        friend.username
                       }
                       small
                     />
 
-                    <Text
+                    <View
                       style={
-                        styles.eventParticipantName
+                        styles.friendPickerInfo
                       }
                     >
-                      {
-                        participant.displayName ||
-                        participant.username
+                      <Text
+                        style={
+                          styles.friendPickerName
+                        }
+                      >
+                        {friend.displayName ||
+                          friend.username ||
+                          'User'}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.friendPickerUsername
+                        }
+                      >
+                        @{friend.username || 'user'}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.addButton,
+                        added &&
+                          styles.addButtonActive,
+                      ]}
+                    >
+                      <Text
+                        style={
+                          styles.addButtonText
+                        }
+                      >
+                        {added
+                          ? 'Added'
+                          : 'Add'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </ScrollView>
+
+          <Text style={styles.addedCount}>
+            {
+              Object.values(groupSelected).filter(
+                Boolean
+              ).length
+            }{' '}
+            added
+          </Text>
+
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={createGroup}
+          >
+            <Text
+              style={styles.primaryButtonText}
+            >
+              Create Group
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderAttachmentMenu = () => (
+    <Modal
+      visible={showComposer}
+      transparent
+      animationType="slide"
+      onRequestClose={() =>
+        setShowComposer(false)
+      }
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.attachmentModal}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Attach
+            </Text>
+
+            <TouchableOpacity
+              onPress={() =>
+                setShowComposer(false)
+              }
+            >
+              <Ionicons
+                name="close"
+                size={25}
+                color={COLORS.text}
+              />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.attachmentGrid}>
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                pickImage();
+              }}
+            >
+              <Ionicons
+                name="image-outline"
+                size={30}
+                color={COLORS.blueBright}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                Photo
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                setPanel('gif');
+              }}
+            >
+              <Ionicons
+                name="happy-outline"
+                size={30}
+                color={COLORS.yellow}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                GIF / Sticker
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                setPanel('poll');
+              }}
+            >
+              <Ionicons
+                name="stats-chart-outline"
+                size={30}
+                color={COLORS.green}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                Poll
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                setPanel('event');
+              }}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={30}
+                color={COLORS.urgent}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                Event
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                startRecordingUI();
+              }}
+            >
+              <Ionicons
+                name="mic-outline"
+                size={30}
+                color={COLORS.text}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                Voice
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentTile}
+              onPress={() => {
+                setShowComposer(false);
+                Alert.alert(
+                  'File attachment',
+                  'File selection and permanent Drive upload are not connected yet.'
+                );
+              }}
+            >
+              <Ionicons
+                name="document-outline"
+                size={30}
+                color={COLORS.secondary}
+              />
+              <Text
+                style={styles.attachmentTileText}
+              >
+                File
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderPollCreator = () => {
+    if (panel !== 'poll') return null;
+
+    return (
+      <Modal
+        visible
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setPanel(null)
+        }
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.creatorModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Create Poll
+              </Text>
+
+              <TouchableOpacity
+                onPress={() =>
+                  setPanel(null)
+                }
+              >
+                <Ionicons
+                  name="close"
+                  size={25}
+                  color={COLORS.text}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Question"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={pollQuestion}
+              onChangeText={setPollQuestion}
+              maxLength={300}
+            />
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                styles.multilineInput,
+              ]}
+              placeholder="Description (optional)"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={pollDescription}
+              onChangeText={setPollDescription}
+              multiline
+              maxLength={500}
+            />
+
+            <ScrollView
+              style={styles.optionsScroll}
+              keyboardShouldPersistTaps="handled"
+            >
+              {pollOptions.map(
+                (option, index) => (
+                  <View
+                    key={`poll-${index}`}
+                    style={styles.optionRow}
+                  >
+                    <TextInput
+                      style={[
+                        styles.modalInput,
+                        styles.optionInput,
+                      ]}
+                      placeholder={`Option ${
+                        index + 1
+                      }`}
+                      placeholderTextColor={
+                        COLORS.secondary
                       }
-                    </Text>
+                      value={option}
+                      onChangeText={value =>
+                        updatePollOption(
+                          index,
+                          value
+                        )
+                      }
+                      maxLength={150}
+                    />
+
+                    <TouchableOpacity
+                      style={
+                        styles.removeOption
+                      }
+                      onPress={() =>
+                        removePollOption(index)
+                      }
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={23}
+                        color={COLORS.red}
+                      />
+                    </TouchableOpacity>
                   </View>
                 )
               )}
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={addPollOption}
+              >
+                <Ionicons
+                  name="add"
+                  size={20}
+                  color={COLORS.blueBright}
+                />
+
+                <Text
+                  style={
+                    styles.secondaryButtonText
+                  }
+                >
+                  Add option
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                creatingPoll &&
+                  styles.disabledButton,
+              ]}
+              disabled={creatingPoll}
+              onPress={createPoll}
+            >
+              {creatingPoll ? (
+                <ActivityIndicator
+                  color={COLORS.text}
+                />
+              ) : (
+                <Text
+                  style={
+                    styles.primaryButtonText
+                  }
+                >
+                  Create Poll
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderEventCreator = () => {
+    if (panel !== 'event') return null;
+
+    return (
+      <Modal
+        visible
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setPanel(null)
+        }
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.creatorModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Create Event
+              </Text>
+
+              <TouchableOpacity
+                onPress={() =>
+                  setPanel(null)
+                }
+              >
+                <Ionicons
+                  name="close"
+                  size={25}
+                  color={COLORS.text}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Event name"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={eventName}
+              onChangeText={setEventName}
+              maxLength={120}
+            />
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                styles.multilineInput,
+              ]}
+              placeholder="Description"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={eventDescription}
+              onChangeText={
+                setEventDescription
+              }
+              multiline
+              maxLength={500}
+            />
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Start date / time"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={eventStart}
+              onChangeText={setEventStart}
+              maxLength={100}
+            />
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="End date / time"
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={eventEnd}
+              onChangeText={setEventEnd}
+              maxLength={100}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                creatingEvent &&
+                  styles.disabledButton,
+              ]}
+              disabled={creatingEvent}
+              onPress={createEvent}
+            >
+              {creatingEvent ? (
+                <ActivityIndicator
+                  color={COLORS.text}
+                />
+              ) : (
+                <Text
+                  style={
+                    styles.primaryButtonText
+                  }
+                >
+                  Create Event
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderGifPanel = () => {
+    if (panel !== 'gif') return null;
+
+    return (
+      <Modal
+        visible
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setPanel(null)
+        }
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.gifModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                GIFs & Stickers
+              </Text>
+
+              <TouchableOpacity
+                onPress={() =>
+                  setPanel(null)
+                }
+              >
+                <Ionicons
+                  name="close"
+                  size={25}
+                  color={COLORS.text}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.segmentRow}>
+              {['gif', 'sticker'].map(type => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.segment,
+                    gifMode === type &&
+                      styles.segmentActive,
+                  ]}
+                  onPress={() =>
+                    setGifMode(type)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      gifMode === type &&
+                        styles.segmentTextActive,
+                    ]}
+                  >
+                    {type === 'gif'
+                      ? 'GIF'
+                      : 'Sticker'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder={`Search ${gifMode}s`}
+              placeholderTextColor={
+                COLORS.secondary
+              }
+              value={gifSearch}
+              onChangeText={setGifSearch}
+            />
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={
+                false
+              }
+              contentContainerStyle={
+                styles.categoryRow
+              }
+            >
+              {[
+                'normal',
+                'trending',
+                'funny',
+                'reaction',
+                'gaming',
+              ].map(category => (
+                <TouchableOpacity
+                  key={category}
+                  style={[
+                    styles.categoryChip,
+                    gifCategory === category &&
+                      styles.categoryChipActive,
+                  ]}
+                  onPress={() =>
+                    setGifCategory(category)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      gifCategory ===
+                        category &&
+                        styles.categoryTextActive,
+                    ]}
+                  >
+                    {category}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.gifEmpty}>
+              <Ionicons
+                name={
+                  gifMode === 'gif'
+                    ? 'images-outline'
+                    : 'happy-outline'
+                }
+                size={46}
+                color={COLORS.secondary}
+              />
+
+              <Text
+                style={styles.gifEmptyTitle}
+              >
+                {gifSearch.trim()
+                  ? 'Search UI ready'
+                  : 'GIF / sticker browser'}
+              </Text>
+
+              <Text
+                style={styles.gifEmptyText}
+              >
+                A real GIF provider API and
+                attribution flow still need to be
+                connected. This screen does not
+                pretend that a GIF was sent.
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderPollMessage = message => {
+    const poll = message;
+
+    return (
+      <View style={styles.pollCard}>
+        <Text style={styles.pollQuestion}>
+          {poll.question}
+        </Text>
+
+        {!!poll.description && (
+          <Text style={styles.pollDescription}>
+            {poll.description}
+          </Text>
+        )}
+
+        {(poll.options || []).map(
+          (option, index) => {
+            const votes =
+              Number(
+                poll.votes?.[index] || 0
+              );
+
+            const percent =
+              pollPercent(
+                poll,
+                index
+              );
+
+            const selectedVote =
+              Number(
+                poll.voters?.[uid]
+              ) === index;
+
+            return (
+              <TouchableOpacity
+                key={`${message.id}-option-${index}`}
+                style={[
+                  styles.pollOption,
+                  selectedVote &&
+                    styles.pollOptionSelected,
+                ]}
+                onPress={() =>
+                  votePoll(
+                    message,
+                    index
+                  )
+                }
+              >
+                <View
+                  style={
+                    styles.pollOptionTop
+                  }
+                >
+                  <Text
+                    style={
+                      styles.pollOptionText
+                    }
+                  >
+                    {option}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.pollPercent
+                    }
+                  >
+                    {percent}%
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.pollProgressTrack
+                  }
+                >
+                  <View
+                    style={[
+                      styles.pollProgress,
+                      {
+                        width: `${percent}%`,
+                      },
+                    ]}
+                  />
+                </View>
+
+                <Text
+                  style={styles.pollVotes}
+                >
+                  {votes}{' '}
+                  {votes === 1
+                    ? 'vote'
+                    : 'votes'}
+                </Text>
+              </TouchableOpacity>
+            );
+          }
+        )}
+
+        <Text style={styles.pollTotal}>
+          {pollTotal(poll)} total votes
+        </Text>
+      </View>
+    );
+  };
+
+  const renderEventMessage = message => {
+    const joined = Boolean(
+      message.attendees?.[uid]
+    );
+
+    const attendeeCount =
+      Object.keys(
+        message.attendees || {}
+      ).length;
+
+    return (
+      <View style={styles.eventCard}>
+        <View style={styles.eventIcon}>
+          <Ionicons
+            name="calendar"
+            size={26}
+            color={COLORS.urgent}
+          />
+        </View>
+
+        <View style={styles.eventContent}>
+          <Text style={styles.eventTitle}>
+            {message.name}
+          </Text>
+
+          {!!message.description && (
+            <Text
+              style={styles.eventDescription}
+            >
+              {message.description}
+            </Text>
+          )}
+
+          {!!message.start && (
+            <Text style={styles.eventTime}>
+              Start: {message.start}
+            </Text>
+          )}
+
+          {!!message.end && (
+            <Text style={styles.eventTime}>
+              End: {message.end}
+            </Text>
+          )}
+
+          <Text style={styles.eventAttendees}>
+            {attendeeCount}{' '}
+            {attendeeCount === 1
+              ? 'person'
+              : 'people'}{' '}
+            joined
+          </Text>
 
           <TouchableOpacity
             style={[
-              styles.joinEventButton,
+              styles.eventJoinButton,
               joined &&
-                styles.joinedEventButton,
+                styles.eventJoinButtonActive,
             ]}
             onPress={() =>
-              joinEvent(
-                message
-              )
+              toggleEventAttendance(message)
             }
           >
             <Text
               style={
-                styles.joinEventText
+                styles.eventJoinText
               }
             >
-              {joined
-                ? 'Joined'
-                : 'Join'}
+              {joined ? 'Joined' : 'Join'}
             </Text>
           </TouchableOpacity>
         </View>
-      );
-    };
+      </View>
+    );
+  };
 
+  const renderMessage = ({
+    item,
+  }) => {
+    const own = item.senderId === uid;
 
-  const renderVoiceMessage =
-    (
-      message,
-      mine
-    ) => {
+    if (item.deleted) {
       return (
         <View
-          style={
-            styles.voiceMessageCard
-          }
+          style={[
+            styles.messageRow,
+            own &&
+              styles.messageRowOwn,
+          ]}
         >
-          <TouchableOpacity
-            style={
-              styles.voicePlayButton
-            }
-          >
-            <Ionicons
-              name="play"
-              size={17}
-              color={
-                COLORS.text
-              }
-            />
-          </TouchableOpacity>
-
           <View
-            style={
-              styles.waveform
-            }
+            style={[
+              styles.messageBubble,
+              styles.deletedBubble,
+            ]}
           >
-            {Array.from(
-              {
-                length: 28,
-              }
-            ).map(
-              (
-                _,
-                index
-              ) => (
-                <View
-                  key={
-                    index
-                  }
-                  style={[
-                    styles.waveBar,
-                    {
-                      height:
-                        7 +
-                        (
-                          index *
-                          13
-                        ) %
-                          21,
-                    },
-                  ]}
-                />
-              )
-            )}
+            <Text
+              style={styles.deletedText}
+            >
+              This message was deleted.
+            </Text>
           </View>
-
-          <Text
-            style={
-              styles.voiceDuration
-            }
-          >
-            {message.duration ||
-              '0:00'}
-          </Text>
         </View>
       );
-    };
+    }
 
-
-  const renderMessage =
-    ({
-      item,
-      index,
-    }) => {
-      const mine =
-        item.senderUid ===
-        currentUser?.uid;
-
-      const previous =
-        messages[
-          index - 1
-        ];
-
-      const showDate =
-        !previous ||
-        getDayKey(
-          previous.createdAt
-        ) !==
-          getDayKey(
-            item.createdAt
-          );
-
+    if (item.type === 'poll') {
       return (
-        <View>
-          {showDate && (
-            <View
-              style={
-                styles.dateSeparator
-              }
-            >
-              <Text
-                style={
-                  styles.dateSeparatorText
-                }
-              >
-                {
-                  getDateLabel(
-                    item.createdAt
-                  )
-                }
-              </Text>
-            </View>
+        <View
+          style={[
+            styles.messageRow,
+            own &&
+              styles.messageRowOwn,
+          ]}
+        >
+          {!own && (
+            <Avatar
+              name={item.senderName}
+              small
+            />
+          )}
+
+          {renderPollMessage(item)}
+        </View>
+      );
+    }
+
+    if (item.type === 'event') {
+      return (
+        <View
+          style={[
+            styles.messageRow,
+            own &&
+              styles.messageRowOwn,
+          ]}
+        >
+          {!own && (
+            <Avatar
+              name={item.senderName}
+              small
+            />
+          )}
+
+          {renderEventMessage(item)}
+        </View>
+      );
+    }
+
+    if (item.type === 'voice') {
+      return (
+        <View
+          style={[
+            styles.messageRow,
+            own &&
+              styles.messageRowOwn,
+          ]}
+        >
+          {!own && (
+            <Avatar
+              name={item.senderName}
+              small
+            />
           )}
 
           <View
             style={[
-              styles.messageRow,
-              mine &&
-                styles.myMessageRow,
+              styles.voiceBubble,
+              own &&
+                styles.voiceBubbleOwn,
             ]}
           >
-            {!mine &&
-              selectedConversation?.type ===
-                'group' && (
-                <Text
-                  style={
-                    styles.messageSenderName
-                  }
-                >
-                  {item.senderDisplayName ||
-                    item.senderUsername}
-                </Text>
-              )}
+            <Ionicons
+              name="mic"
+              size={21}
+              color={COLORS.text}
+            />
 
-            <View
-              style={[
-                styles.messageBubble,
-                mine &&
-                  styles.myMessageBubble,
-                (
-                  item.type ===
-                    'poll' ||
-                  item.type ===
-                    'event'
-                ) &&
-                  styles.specialMessageBubble,
-              ]}
+            <Text
+              style={styles.voiceText}
             >
-              {item.type ===
-              'text' ? (
-                <Text
-                  style={[
-                    styles.messageText,
-                    mine &&
-                      styles.myMessageText,
-                  ]}
-                >
-                  {
-                    item.text
-                  }
-                </Text>
-              ) : item.type ===
-                'poll' ? (
-                renderPollMessage(
-                  item,
-                  mine
-                )
-              ) : item.type ===
-                'event' ? (
-                renderEventMessage(
-                  item
-                )
-              ) : item.type ===
-                'voice' ? (
-                renderVoiceMessage(
-                  item,
-                  mine
-                )
-              ) : (
-                <Text
-                  style={
-                    styles.messageText
-                  }
-                >
-                  Message type not connected yet.
-                </Text>
-              )}
+              Voice message
+            </Text>
 
-              <Text
-                style={[
-                  styles.messageTime,
-                  mine &&
-                    styles.myMessageTime,
-                ]}
-              >
-                {formatTime(
-                  item.createdAt
-                )}
-              </Text>
-            </View>
+            <Text
+              style={styles.voiceDuration}
+            >
+              {item.duration || '00:00'}
+            </Text>
           </View>
         </View>
       );
-    };
+    }
 
-
-  /* =========================================================
-     ACTIVITY INDICATOR
-  ========================================================= */
-
-  const renderActivityIndicator =
-    () => {
-      const users =
-        Object.values(
-          typingUsers
-        );
-
-      if (
-        users.length ===
-        0
-      ) {
-        return null;
-      }
-
-      const first =
-        users[0];
-
-      const name =
-        first.displayName ||
-        first.username ||
-        'Someone';
-
-      return (
-        <View
-          style={
-            styles.activityContainer
-          }
-        >
+    return (
+      <View
+        style={[
+          styles.messageRow,
+          own && styles.messageRowOwn,
+        ]}
+      >
+        {!own && (
           <Avatar
-            name={
-              name
-            }
+            name={item.senderName}
             small
           />
-
-          <View
-            style={
-              styles.typingBubble
-            }
-          >
-            <View
-              style={
-                styles.typingDots
-              }
-            >
-              <View
-                style={
-                  styles.typingDot
-                }
-              />
-
-              <View
-                style={
-                  styles.typingDot
-                }
-              />
-
-              <View
-                style={
-                  styles.typingDot
-                }
-              />
-            </View>
-          </View>
-
-          <Text
-            style={
-              styles.activityText
-            }
-          >
-            {users.length ===
-            1
-              ? `${name} is typing`
-              : `${users.length} people are typing`}
-          </Text>
-        </View>
-      );
-    };
-
-
-  /* =========================================================
-     ATTACHMENT MENU
-  ========================================================= */
-
-  const renderAttachmentMenu =
-    () => {
-      return (
-        <Modal
-          visible={
-            showComposerMenu
-          }
-          transparent
-          animationType="fade"
-          onRequestClose={() =>
-            setShowComposerMenu(
-              false
-            )
-          }
-        >
-          <TouchableOpacity
-            style={
-              styles.modalOverlayBottom
-            }
-            activeOpacity={1}
-            onPress={() =>
-              setShowComposerMenu(
-                false
-              )
-            }
-          >
-            <View
-              style={
-                styles.attachmentBox
-              }
-            >
-              <View
-                style={
-                  styles.panelHeader
-                }
-              >
-                <Text
-                  style={
-                    styles.panelTitle
-                  }
-                >
-                  Attach
-                </Text>
-
-                <TouchableOpacity
-                  onPress={() =>
-                    setShowComposerMenu(
-                      false
-                    )
-                  }
-                >
-                  <Ionicons
-                    name="close"
-                    size={23}
-                    color={
-                      COLORS.text
-                    }
-                  />
-                </TouchableOpacity>
-              </View>
-
-              <View
-                style={
-                  styles.attachmentGrid
-                }
-              >
-                <AttachmentButton
-                  icon="image-outline"
-                  title="Image"
-                  onPress={() =>
-                    pickImages(
-                      false
-                    )
-                  }
-                />
-
-                <AttachmentButton
-                  icon="document-outline"
-                  title="Files"
-                  onPress={() =>
-                    Alert.alert(
-                      'Files',
-                      'Connect the real document picker and Drive file upload here. No fake file message is created.'
-                    )
-                  }
-                />
-
-                <AttachmentButton
-                  icon="stats-chart-outline"
-                  title="Poll"
-                  onPress={() =>
-                    openComposerPanel(
-                      'poll'
-                    )
-                  }
-                />
-
-                <AttachmentButton
-                  icon="calendar-outline"
-                  title="Event"
-                  onPress={() =>
-                    openComposerPanel(
-                      'event'
-                    )
-                  }
-                />
-
-                <AttachmentButton
-                  icon="camera-outline"
-                  title="Camera"
-                  onPress={() =>
-                    pickImages(
-                      true
-                    )
-                  }
-                />
-
-                <AttachmentButton
-                  icon="person-add-outline"
-                  title="Invite"
-                  onPress={() =>
-                    Alert.alert(
-                      'Invite',
-                      'Friend/call invitation flow will connect to the real call/chat membership system.'
-                    )
-                  }
-                />
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      );
-    };
-
-
-  /* =========================================================
-     ATTACHMENT BUTTON
-  ========================================================= */
-
-  function AttachmentButton({
-    icon,
-    title,
-    onPress,
-  }) {
-    return (
-      <TouchableOpacity
-        style={
-          styles.attachmentItem
-        }
-        onPress={
-          onPress
-        }
-      >
-        <View
-          style={
-            styles.attachmentIcon
-          }
-        >
-          <Ionicons
-            name={icon}
-            size={25}
-            color={
-              COLORS.blue
-            }
-          />
-        </View>
-
-        <Text
-          style={
-            styles.attachmentText
-          }
-        >
-          {title}
-        </Text>
-      </TouchableOpacity>
-    );
-  }
-
-
-  /* =========================================================
-     FRIENDS SCREEN
-  ========================================================= */
-
-  const renderFriendsScreen =
-    () => (
-      <SafeAreaView
-        style={
-          styles.container
-        }
-      >
-        <StatusBar
-          style="light"
-        />
-
-        {renderBackHeader(
-          'Friends',
-          () =>
-            setScreen(
-              'main'
-            )
         )}
 
-        {loadingFriends ? (
-          <View
-            style={
-              styles.centerLoading
-            }
-          >
-            <ActivityIndicator
-              color={
-                COLORS.blue
-              }
-            />
-          </View>
-        ) : (
-          <FlatList
-            data={
-              friends
-            }
-            keyExtractor={(
-              item
-            ) =>
-              item.id
-            }
-            contentContainerStyle={[
-              styles.listContainer,
-              friends.length ===
-                0 &&
-                styles.emptyListContainer,
-            ]}
-            renderItem={({
-              item,
-            }) => (
-              <TouchableOpacity
+        <View
+          style={[
+            styles.messageBubble,
+            own &&
+              styles.messageBubbleOwn,
+          ]}
+        >
+          {!own &&
+            selected?.type ===
+              'group' && (
+              <Text
                 style={
-                  styles.friendCard
-                }
-                onPress={() =>
-                  openDirectConversation(
-                    item
-                  )
+                  styles.messageSender
                 }
               >
-                <Avatar
-                  name={
-                    item.displayName ||
-                    item.username
-                  }
-                />
+                {item.senderName ||
+                  item.senderUsername ||
+                  'User'}
+              </Text>
+            )}
 
+          <Text
+            style={[
+              styles.messageText,
+              own &&
+                styles.messageTextOwn,
+            ]}
+          >
+            {item.text}
+          </Text>
+
+          <View style={styles.messageMeta}>
+            <Text
+              style={
+                own
+                  ? styles.messageTimeOwn
+                  : styles.messageTime
+              }
+            >
+              {formatTime(
+                item.createdAt
+              )}
+            </Text>
+
+            {own && (
+              <Ionicons
+                name="checkmark-done"
+                size={14}
+                color={COLORS.blueBright}
+              />
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderConversationList = () => {
+    if (loadingChats) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator
+            size="large"
+            color={COLORS.blueBright}
+          />
+        </View>
+      );
+    }
+
+    if (!filteredConversations.length) {
+      return (
+        <EmptyState
+          icon="chatbubbles-outline"
+          title="No chats"
+          text={
+            activeTab === 'All'
+              ? 'Your conversations will appear here.'
+              : `There are no ${activeTab.toLowerCase()} chats right now.`
+          }
+        />
+      );
+    }
+
+    return (
+      <FlatList
+        data={filteredConversations}
+        keyExtractor={item => item.id}
+        contentContainerStyle={
+          styles.conversationList
+        }
+        keyboardShouldPersistTaps="handled"
+        renderItem={({ item }) => {
+          const unread =
+            uid &&
+            millis(item.lastMessageAt) >
+              millis(
+                item.lastReadAt?.[uid]
+              ) &&
+            item.lastSenderId !== uid;
+
+          const name =
+            getConversationName(item);
+
+          return (
+            <TouchableOpacity
+              style={styles.conversationRow}
+              onPress={() =>
+                openConversation(item)
+              }
+            >
+              <Avatar
+                name={name}
+                group={
+                  item.type === 'group'
+                }
+              />
+
+              <View
+                style={
+                  styles.conversationContent
+                }
+              >
                 <View
                   style={
-                    styles.friendInfo
+                    styles.conversationTop
                   }
                 >
                   <Text
-                    style={
-                      styles.chatName
-                    }
+                    style={[
+                      styles.conversationName,
+                      unread &&
+                        styles.conversationNameUnread,
+                    ]}
+                    numberOfLines={1}
                   >
-                    {item.displayName ||
-                      item.username}
+                    {name}
                   </Text>
 
                   <Text
                     style={
-                      styles.chatMessage
+                      styles.conversationTime
                     }
                   >
-                    @{item.username}
+                    {formatTime(
+                      item.lastMessageAt
+                    )}
                   </Text>
                 </View>
 
-                <Feather
-                  name="message-circle"
-                  size={22}
-                  color={
-                    COLORS.blue
+                <View
+                  style={
+                    styles.conversationBottom
                   }
-                />
-              </TouchableOpacity>
-            )}
-            ListEmptyComponent={
-              <EmptyState
-                icon="people-outline"
-                title="No friends yet"
-                text="Search for a username to add friends."
-              />
-            }
-          />
-        )}
-      </SafeAreaView>
+                >
+                  <Text
+                    style={[
+                      styles.conversationPreview,
+                      unread &&
+                        styles.conversationPreviewUnread,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.lastMessageText ||
+                      'No messages yet'}
+                  </Text>
+
+                  <View
+                    style={
+                      styles.conversationIcons
+                    }
+                  >
+                    {isFavorite(item) && (
+                      <Ionicons
+                        name="star"
+                        size={15}
+                        color={
+                          COLORS.yellow
+                        }
+                      />
+                    )}
+
+                    {isUrgent(item) && (
+                      <Ionicons
+                        name="alert-circle"
+                        size={16}
+                        color={
+                          COLORS.urgent
+                        }
+                      />
+                    )}
+
+                    {unread && (
+                      <View
+                        style={
+                          styles.unreadDot
+                        }
+                      />
+                    )}
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+      />
     );
+  };
 
+  const renderFriendsScreen = () => (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
 
-  /* =========================================================
-     REQUEST SCREEN
-  ========================================================= */
+      {renderBackHeader('Friends')}
 
-  const renderRequestsScreen =
-    (
-      type
-    ) => {
-      const isFriendRequest =
-        type ===
-        'friend';
-
-      const data =
-        isFriendRequest
-          ? friendRequests
-          : dmRequests;
-
-      return (
-        <SafeAreaView
-          style={
-            styles.container
-          }
+      {loadingFriends ? (
+        <View
+          style={styles.loadingContainer}
         >
-          <StatusBar
-            style="light"
+          <ActivityIndicator
+            size="large"
+            color={COLORS.blueBright}
           />
+        </View>
+      ) : friends.length === 0 ? (
+        <EmptyState
+          icon="people-outline"
+          title="No friends"
+          text="Search for users and send friend requests."
+        />
+      ) : (
+        <FlatList
+          data={friends}
+          keyExtractor={item => item.id}
+          contentContainerStyle={
+            styles.listContent
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.personRow}
+              onPress={() =>
+                openDirectConversation(item)
+              }
+            >
+              <Avatar
+                name={
+                  item.displayName ||
+                  item.username
+                }
+              />
 
-          {renderBackHeader(
-            isFriendRequest
-              ? 'Friend requests'
-              : 'DM requests',
-            () =>
-              setScreen(
-                'main'
-              )
+              <View
+                style={styles.personInfo}
+              >
+                <Text
+                  style={styles.personName}
+                >
+                  {item.displayName ||
+                    item.username ||
+                    'User'}
+                </Text>
+
+                <Text
+                  style={styles.personUsername}
+                >
+                  @{item.username ||
+                    'user'}
+                </Text>
+              </View>
+
+              <Ionicons
+                name="chatbubble-outline"
+                size={21}
+                color={COLORS.secondary}
+              />
+            </TouchableOpacity>
           )}
+        />
+      )}
+    </SafeAreaView>
+  );
 
+  const renderFriendRequestsScreen =
+    () => (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style="light" />
+
+        {renderBackHeader(
+          'Friend Requests'
+        )}
+
+        {friendRequests.length === 0 ? (
+          <EmptyState
+            icon="person-add-outline"
+            title="No friend requests"
+            text="New friend requests will appear here."
+          />
+        ) : (
           <FlatList
-            data={
-              data
+            data={friendRequests}
+            keyExtractor={item => item.id}
+            contentContainerStyle={
+              styles.listContent
             }
-            keyExtractor={(
-              item
-            ) =>
-              item.id
-            }
-            contentContainerStyle={[
-              styles.listContainer,
-              data.length ===
-                0 &&
-                styles.emptyListContainer,
-            ]}
-            renderItem={({
-              item,
-            }) => (
+            renderItem={({ item }) => (
               <View
                 style={
                   styles.requestCard
@@ -5430,8 +3567,10 @@ export default function ChatScreen({
               >
                 <Avatar
                   name={
-                    item.senderDisplayName ||
-                    item.senderUsername
+                    item.fromProfile
+                      ?.displayName ||
+                    item.fromProfile
+                      ?.username
                   }
                 />
 
@@ -5442,28 +3581,31 @@ export default function ChatScreen({
                 >
                   <Text
                     style={
-                      styles.chatName
+                      styles.personName
                     }
                   >
-                    {item.senderDisplayName ||
-                      item.senderUsername}
+                    {item.fromProfile
+                      ?.displayName ||
+                      item.fromProfile
+                        ?.username ||
+                      'User'}
                   </Text>
 
                   <Text
                     style={
-                      styles.chatMessage
+                      styles.personUsername
                     }
                   >
-                    @{item.senderUsername}{' '}
-                    {isFriendRequest
-                      ? 'sent you a friend request.'
-                      : 'wants to DM you.'}
+                    @
+                    {item.fromProfile
+                      ?.username ||
+                      'user'}
                   </Text>
                 </View>
 
                 <View
                   style={
-                    styles.requestButtons
+                    styles.requestActions
                   }
                 >
                   <TouchableOpacity
@@ -5471,22 +3613,18 @@ export default function ChatScreen({
                       styles.acceptButton
                     }
                     onPress={() =>
-                      isFriendRequest
-                        ? acceptFriendRequest(
-                            item
-                          )
-                        : acceptDMRequest(
-                            item
-                          )
+                      acceptFriendRequest(
+                        item
+                      )
                     }
                   >
-                    <Text
-                      style={
-                        styles.buttonText
+                    <Ionicons
+                      name="checkmark"
+                      size={19}
+                      color={
+                        COLORS.text
                       }
-                    >
-                      Accept
-                    </Text>
+                    />
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -5494,577 +3632,1100 @@ export default function ChatScreen({
                       styles.rejectButton
                     }
                     onPress={() =>
-                      isFriendRequest
-                        ? rejectFriendRequest(
-                            item
-                          )
-                        : rejectDMRequest(
-                            item
-                          )
+                      rejectFriendRequest(
+                        item
+                      )
                     }
                   >
-                    <Text
-                      style={
-                        styles.buttonText
+                    <Ionicons
+                      name="close"
+                      size={19}
+                      color={
+                        COLORS.text
                       }
-                    >
-                      Reject
-                    </Text>
+                    />
                   </TouchableOpacity>
                 </View>
               </View>
             )}
-            ListEmptyComponent={
-              <EmptyState
-                icon={
-                  isFriendRequest
-                    ? 'user-plus'
-                    : 'mail-outline'
-                }
-                title={
-                  isFriendRequest
-                    ? 'No friend requests'
-                    : 'No DM requests'
-                }
-                text="New requests will appear here."
-              />
-            }
           />
-        </SafeAreaView>
-      );
-    };
+        )}
+      </SafeAreaView>
+    );
 
+  const renderDMRequestsScreen = () => (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
 
-  /* =========================================================
-     GROUP MODAL
-  ========================================================= */
+      {renderBackHeader('DM Requests')}
 
-  const renderCreateGroupModal =
-    () => (
-      <Modal
-        visible={
-          showCreateGroup
-        }
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setShowCreateGroup(
-            false
-          )
-        }
+      {dmRequests.length === 0 ? (
+        <EmptyState
+          icon="mail-outline"
+          title="No DM requests"
+          text="New direct-message requests will appear here."
+        />
+      ) : (
+        <FlatList
+          data={dmRequests}
+          keyExtractor={item => item.id}
+          contentContainerStyle={
+            styles.listContent
+          }
+          renderItem={({ item }) => (
+            <View
+              style={styles.requestCard}
+            >
+              <Avatar
+                name={
+                  item.fromProfile
+                    ?.displayName ||
+                  item.fromProfile
+                    ?.username
+                }
+              />
+
+              <View
+                style={styles.requestInfo}
+              >
+                <Text
+                  style={
+                    styles.personName
+                  }
+                >
+                  {item.fromProfile
+                    ?.displayName ||
+                    item.fromProfile
+                      ?.username ||
+                    'User'}
+                </Text>
+
+                <Text
+                  style={
+                    styles.personUsername
+                  }
+                >
+                  @
+                  {item.fromProfile
+                    ?.username ||
+                    'user'}
+                </Text>
+              </View>
+
+              <View
+                style={styles.requestActions}
+              >
+                <TouchableOpacity
+                  style={
+                    styles.acceptButton
+                  }
+                  onPress={() =>
+                    acceptDMRequest(
+                      item
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="checkmark"
+                    size={19}
+                    color={COLORS.text}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={
+                    styles.rejectButton
+                  }
+                  onPress={() =>
+                    rejectDMRequest(
+                      item
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="close"
+                    size={19}
+                    color={COLORS.text}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        />
+      )}
+    </SafeAreaView>
+  );
+
+  const renderSearchScreen = () => (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
+
+      {renderBackHeader('Search')}
+
+      <View
+        style={styles.searchPageContainer}
       >
         <View
-          style={
-            styles.modalOverlay
-          }
+          style={styles.searchInputWrap}
         >
-          <View
-            style={
-              styles.createGroupBox
+          <Ionicons
+            name="search"
+            size={20}
+            color={COLORS.secondary}
+          />
+
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Username"
+            placeholderTextColor={
+              COLORS.secondary
             }
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            autoCorrect={false}
+            onSubmitEditing={
+              searchUser
+            }
+            returnKeyType="search"
+          />
+
+          <TouchableOpacity
+            onPress={searchUser}
+            disabled={searching}
           >
+            {searching ? (
+              <ActivityIndicator
+                size="small"
+                color={COLORS.blueBright}
+              />
+            ) : (
+              <Ionicons
+                name="arrow-forward-circle"
+                size={27}
+                color={COLORS.blueBright}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {searchResult ? (
+          <View
+            style={styles.searchResultCard}
+          >
+            <Avatar
+              name={
+                searchResult.displayName ||
+                searchResult.username
+              }
+            />
+
             <View
               style={
-                styles.panelHeader
+                styles.searchResultInfo
               }
             >
               <Text
                 style={
-                  styles.panelTitle
+                  styles.personName
                 }
               >
-                Create group
+                {searchResult.displayName ||
+                  searchResult.username ||
+                  'User'}
+              </Text>
+
+              <Text
+                style={
+                  styles.personUsername
+                }
+              >
+                @{searchResult.username ||
+                  'user'}
+              </Text>
+            </View>
+
+            {searchResult.id !== uid && (
+              <View
+                style={
+                  styles.searchResultActions
+                }
+              >
+                <TouchableOpacity
+                  style={
+                    styles.smallActionButton
+                  }
+                  onPress={() =>
+                    sendFriendRequest(
+                      searchResult
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="person-add-outline"
+                    size={19}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={
+                    styles.smallActionButton
+                  }
+                  onPress={() =>
+                    sendDMRequest(
+                      searchResult
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="mail-outline"
+                    size={19}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={
+                    styles.smallActionButton
+                  }
+                  onPress={() =>
+                    openDirectConversation(
+                      searchResult
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="chatbubble-outline"
+                    size={19}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        ) : (
+          <EmptyState
+            icon="search-outline"
+            title="Find someone"
+            text="Search using their exact Shinzi username."
+          />
+        )}
+      </View>
+    </SafeAreaView>
+  );
+
+  const renderConversationScreen =
+    () => {
+      const name =
+        getConversationName(
+          selectedConversation
+        );
+
+      const username =
+        getConversationUsername(
+          selectedConversation
+        );
+
+      const typingNames =
+        Object.values(typingUsers)
+          .map(
+            item =>
+              item.displayName ||
+              item.username ||
+              'Someone'
+          );
+
+      return (
+        <SafeAreaView
+          style={styles.safeArea}
+        >
+          <StatusBar style="light" />
+
+          <View
+            style={styles.chatHeader}
+          >
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={goBack}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={23}
+                color={COLORS.text}
+              />
+            </TouchableOpacity>
+
+            <Avatar
+              name={name}
+              group={
+                selectedConversation?.type ===
+                'group'
+              }
+              small
+            />
+
+            <View
+              style={styles.chatHeaderInfo}
+            >
+              <Text
+                style={styles.chatHeaderName}
+                numberOfLines={1}
+              >
+                {name}
+              </Text>
+
+              <Text
+                style={
+                  styles.chatHeaderSubtitle
+                }
+                numberOfLines={1}
+              >
+                {selectedConversation?.type ===
+                'group'
+                  ? `${
+                      selectedConversation
+                        ?.memberIds
+                        ?.length || 0
+                    } members`
+                  : username
+                    ? `@${username}`
+                    : 'Direct message'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() =>
+                toggleFavorite(
+                  selectedConversation
+                )
+              }
+            >
+              <Ionicons
+                name={
+                  isFavorite(
+                    selectedConversation
+                  )
+                    ? 'star'
+                    : 'star-outline'
+                }
+                size={21}
+                color={
+                  isFavorite(
+                    selectedConversation
+                  )
+                    ? COLORS.yellow
+                    : COLORS.text
+                }
+              />
+            </TouchableOpacity>
+
+            {selectedConversation?.type !==
+              'group' && (
+              <>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() =>
+                    startCallUI(
+                      'voice'
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="call-outline"
+                    size={21}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() =>
+                    startCallUI(
+                      'video'
+                    )
+                  }
+                >
+                  <Ionicons
+                    name="videocam-outline"
+                    size={21}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={item =>
+              item.id
+            }
+            renderItem={
+              renderMessage
+            }
+            contentContainerStyle={
+              styles.messagesContent
+            }
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() =>
+              listRef.current?.scrollToEnd?.({
+                animated: false,
+              })
+            }
+            ListEmptyComponent={
+              <EmptyState
+                icon="chatbubble-ellipses-outline"
+                title="Start the conversation"
+                text="Send a message to begin."
+              />
+            }
+          />
+
+          {typingNames.length > 0 && (
+            <View
+              style={styles.typingBar}
+            >
+              <View
+                style={styles.typingDots}
+              >
+                <View
+                  style={styles.dot}
+                />
+                <View
+                  style={styles.dot}
+                />
+                <View
+                  style={styles.dot}
+                />
+              </View>
+
+              <Text
+                style={styles.typingText}
+              >
+                {typingNames.join(
+                  ', '
+                )}{' '}
+                {typingNames.length === 1
+                  ? 'is'
+                  : 'are'}{' '}
+                typing...
+              </Text>
+            </View>
+          )}
+
+          {recording && (
+            <View
+              style={styles.recordingBar}
+            >
+              <View
+                style={
+                  styles.recordingIndicator
+                }
+              />
+
+              <Text
+                style={
+                  styles.recordingText
+                }
+              >
+                Recording{' '}
+                {formatDuration(
+                  recordSeconds
+                )}
               </Text>
 
               <TouchableOpacity
+                onPress={
+                  startRecordingUI
+                }
+              >
+                <Text
+                  style={
+                    styles.recordingStop
+                  }
+                >
+                  Stop
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <KeyboardAvoidingView
+            behavior={
+              Platform.OS === 'ios'
+                ? 'padding'
+                : undefined
+            }
+          >
+            <View
+              style={styles.composer}
+            >
+              <TouchableOpacity
+                style={
+                  styles.composerIcon
+                }
                 onPress={() =>
-                  setShowCreateGroup(
-                    false
-                  )
+                  setShowComposer(true)
                 }
               >
                 <Ionicons
-                  name="close"
-                  size={25}
+                  name="add-circle-outline"
+                  size={28}
                   color={
-                    COLORS.text
+                    COLORS.blueBright
                   }
                 />
               </TouchableOpacity>
-            </View>
 
-            <TextInput
-              style={
-                styles.panelInput
-              }
-              placeholder="Group name"
-              placeholderTextColor={
-                COLORS.secondary
-              }
-              value={
-                groupName
-              }
-              onChangeText={
-                setGroupName
-              }
-              maxLength={
-                50
-              }
-            />
-
-            <TextInput
-              style={[
-                styles.panelInput,
-                styles.multilineInput,
-              ]}
-              placeholder="Description"
-              placeholderTextColor={
-                COLORS.secondary
-              }
-              value={
-                groupDescription
-              }
-              onChangeText={
-                setGroupDescription
-              }
-              multiline
-              maxLength={
-                200
-              }
-            />
-
-            <Text
-              style={
-                styles.sectionTitle
-              }
-            >
-              Select friends
-            </Text>
-
-            <Text
-              style={
-                styles.addedText
-              }
-            >
-              {
-                Object.values(
-                  selectedGroupFriends
-                ).filter(
-                  Boolean
-                ).length
-              }{' '}
-              added
-            </Text>
-
-            <ScrollView
-              style={
-                styles.groupFriendsList
-              }
-            >
-              {friends.map(
-                (
-                  friend
-                ) => {
-                  const selected =
-                    selectedGroupFriends[
-                      friend.id
-                    ] === true;
-
-                  return (
-                    <TouchableOpacity
-                      key={
-                        friend.id
-                      }
-                      style={
-                        styles.groupFriendRow
-                      }
-                      onPress={() =>
-                        toggleGroupFriend(
-                          friend.id
-                        )
-                      }
-                    >
-                      <Avatar
-                        name={
-                          friend.displayName ||
-                          friend.username
-                        }
-                        small
-                      />
-
-                      <View
-                        style={
-                          styles.friendInfo
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.chatName
-                          }
-                        >
-                          {friend.displayName ||
-                            friend.username}
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.chatMessage
-                          }
-                        >
-                          @{friend.username}
-                        </Text>
-                      </View>
-
-                      <View
-                        style={[
-                          styles.checkbox,
-                          selected &&
-                            styles.checkboxSelected,
-                        ]}
-                      >
-                        {selected && (
-                          <Ionicons
-                            name="checkmark"
-                            size={16}
-                            color={
-                              COLORS.text
-                            }
-                          />
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
+              <TextInput
+                style={
+                  styles.messageInput
                 }
-              )}
-            </ScrollView>
+                placeholder="Message"
+                placeholderTextColor={
+                  COLORS.secondary
+                }
+                value={messageText}
+                onChangeText={
+                  handleMessageChange
+                }
+                multiline
+                maxLength={
+                  MAX_MESSAGE_LENGTH
+                }
+              />
 
-            <TouchableOpacity
-              style={
-                styles.primaryButton
-              }
-              disabled={
-                creatingGroup
-              }
-              onPress={
-                createGroup
-              }
-            >
-              {creatingGroup ? (
-                <ActivityIndicator
+              <TouchableOpacity
+                style={
+                  styles.composerIcon
+                }
+                onPress={
+                  startRecordingUI
+                }
+              >
+                <Ionicons
+                  name={
+                    recording
+                      ? 'stop-circle-outline'
+                      : 'mic-outline'
+                  }
+                  size={25}
                   color={
-                    COLORS.text
+                    recording
+                      ? COLORS.red
+                      : COLORS.text
                   }
                 />
-              ) : (
-                <Text
-                  style={
-                    styles.primaryButtonText
-                  }
-                >
-                  Create group
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    );
+              </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  (!messageText.trim() ||
+                    sending) &&
+                    styles.sendButtonDisabled,
+                ]}
+                disabled={
+                  !messageText.trim() ||
+                  sending
+                }
+                onPress={
+                  sendMessage
+                }
+              >
+                {sending ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={
+                      COLORS.text
+                    }
+                  />
+                ) : (
+                  <Ionicons
+                    name="send"
+                    size={19}
+                    color={
+                      COLORS.text
+                    }
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
 
-  /* =========================================================
-     MAIN HEADER
-  ========================================================= */
-
-  const renderMainHeader =
-    () => (
-      <View
-        style={
-          styles.topBar
-        }
-      >
-        <View
-          style={
-            styles.headerLeft
-          }
-        >
-          <Text
-            style={
-              styles.headerTitle
-            }
-          >
-            CHATS
-          </Text>
-
-          <TouchableOpacity
-            style={
-              styles.modeButton
-            }
-            onPress={() =>
-              setShowModes(
-                true
-              )
-            }
-          >
-            <Ionicons
-              name="grid-outline"
-              size={17}
-              color={
-                COLORS.secondary
-              }
-            />
-
-            <Text
-              style={
-                styles.modeText
-              }
+            <View
+              style={styles.characterCounter}
             >
-              Modes
-            </Text>
-          </TouchableOpacity>
-        </View>
+              <Text
+                style={
+                  styles.characterCounterText
+                }
+              >
+                {messageText.length}/
+                {MAX_MESSAGE_LENGTH}
+              </Text>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      );
+    };
 
-        <View
-          style={
-            styles.topIcons
+  const renderMainHeader = () => (
+    <View style={styles.mainHeader}>
+      <View>
+        <Text style={styles.headerTitle}>
+          CHATS
+        </Text>
+
+        <Text style={styles.headerSubtitle}>
+          {profile?.displayName ||
+            profile?.username ||
+            'Shinzi'}
+        </Text>
+      </View>
+
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          style={styles.headerIcon}
+          onPress={() =>
+            setShowModes(true)
           }
         >
-          <TouchableOpacity
-            style={
-              styles.iconButton
-            }
-            onPress={() =>
-              setScreen(
-                'dmRequests'
-              )
-            }
-          >
-            <View>
-              <Feather
-                name="mail"
-                size={23}
-                color={
-                  COLORS.text
+          <Ionicons
+            name="options-outline"
+            size={22}
+            color={COLORS.text}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.headerIcon}
+          onPress={() =>
+            setScreen('dmRequests')
+          }
+        >
+          <Ionicons
+            name="mail-outline"
+            size={22}
+            color={COLORS.text}
+          />
+
+          {dmRequests.length > 0 && (
+            <View
+              style={styles.headerBadge}
+            >
+              <Text
+                style={
+                  styles.headerBadgeText
                 }
-              />
-
-              {dmRequests.length >
-                0 && (
-                <Badge
-                  count={
-                    dmRequests.length
-                  }
-                />
-              )}
+              >
+                {dmRequests.length >
+                9
+                  ? '9+'
+                  : dmRequests.length}
+              </Text>
             </View>
-          </TouchableOpacity>
+          )}
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={
-              styles.iconButton
-            }
-            onPress={() =>
-              setScreen(
-                'friendRequests'
-              )
-            }
-          >
-            <View>
-              <Feather
-                name="user-plus"
-                size={23}
-                color={
-                  COLORS.text
+        <TouchableOpacity
+          style={styles.headerIcon}
+          onPress={() =>
+            setScreen(
+              'friendRequests'
+            )
+          }
+        >
+          <Ionicons
+            name="person-add-outline"
+            size={22}
+            color={COLORS.text}
+          />
+
+          {friendRequests.length >
+            0 && (
+            <View
+              style={styles.headerBadge}
+            >
+              <Text
+                style={
+                  styles.headerBadgeText
                 }
-              />
-
-              {friendRequests.length >
-                0 && (
-                <Badge
-                  count={
-                    friendRequests.length
-                  }
-                />
-              )}
+              >
+                {friendRequests.length >
+                9
+                  ? '9+'
+                  : friendRequests.length}
+              </Text>
             </View>
-          </TouchableOpacity>
+          )}
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={
-              styles.iconButton
-            }
-            onPress={() =>
-              setScreen(
-                'friends'
-              )
-            }
-          >
-            <Ionicons
-              name="people-outline"
-              size={25}
-              color={
-                COLORS.text
-              }
-            />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.headerIcon}
+          onPress={() =>
+            setShowGroup(true)
+          }
+        >
+          <Ionicons
+            name="people-outline"
+            size={22}
+            color={COLORS.text}
+          />
+        </TouchableOpacity>
       </View>
-    );
+    </View>
+  );
 
-
-  /* =========================================================
-     SEARCH BAR
-  ========================================================= */
-
-  const renderSearchBar =
-    () => (
+  const renderSearchBar = () => (
+    <View
+      style={styles.topSearchContainer}
+    >
       <View
-        style={
-          styles.searchContainer
-        }
+        style={styles.topSearch}
       >
         <Ionicons
           name="search"
           size={18}
-          color={
-            COLORS.secondary
-          }
+          color={COLORS.secondary}
         />
 
         <TextInput
-          ref={
-            searchInputRef
-          }
-          style={
-            styles.searchInput
-          }
-          placeholder="Search by username or chat"
+          style={styles.topSearchInput}
+          placeholder="Search chats"
           placeholderTextColor={
             COLORS.secondary
           }
-          value={
-            searchQuery
-          }
-          onChangeText={(
-            text
-          ) => {
-            setSearchQuery(
-              text
-            );
-
-            if (
-              !text.trim()
-            ) {
-              setSearchResult(
-                null
-              );
-            }
-          }}
-          onSubmitEditing={
-            searchUser
-          }
+          value={search}
+          onChangeText={setSearch}
           autoCapitalize="none"
           autoCorrect={false}
-          returnKeyType="search"
         />
 
-        {searching ? (
-          <ActivityIndicator
-            size="small"
-            color={
-              COLORS.blue
+        {search.length > 0 && (
+          <TouchableOpacity
+            onPress={() =>
+              setSearch('')
             }
-          />
-        ) : (
-          searchQuery.length >
-            0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setSearchQuery(
-                  ''
-                );
-                setSearchResult(
-                  null
-                );
-              }}
-            >
-              <Ionicons
-                name="close-circle"
-                size={19}
-                color={
-                  COLORS.secondary
-                }
-              />
-            </TouchableOpacity>
-          )
+          >
+            <Ionicons
+              name="close-circle"
+              size={19}
+              color={
+                COLORS.secondary
+              }
+            />
+          </TouchableOpacity>
         )}
       </View>
-    );
 
+      <TouchableOpacity
+        style={styles.searchUsersButton}
+        onPress={() =>
+          setScreen('search')
+        }
+      >
+        <Ionicons
+          name="person-search-outline"
+          size={22}
+          color={COLORS.blueBright}
+        />
+      </TouchableOpacity>
+    </View>
+  );
 
-  /* =========================================================
-     SEARCH RESULT
-  ========================================================= */
-
-  const renderSearchResult =
-    () => {
-      if (
-        !searchResult
-      ) {
-        return null;
+  const renderTabs = () => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={
+        false
       }
+      contentContainerStyle={
+        styles.tabsContent
+      }
+    >
+      {TABS.map(tab => {
+        const active =
+          activeTab === tab;
 
-      return (
-        <View
-          style={
-            styles.searchResultCard
-          }
-        >
-          <Avatar
-            name={
-              searchResult.displayName ||
-              searchResult.username
+        return (
+          <TouchableOpacity
+            key={tab}
+            style={[
+              styles.tab,
+              active &&
+                styles.tabActive,
+            ]}
+            onPress={() =>
+              setActiveTab(tab)
             }
-          />
+          >
+            <Text
+              style={[
+                styles.tabText,
+                active &&
+                  styles.tabTextActive,
+              ]}
+            >
+              {tab}
+            </Text>
 
+            {tab === 'Urgent' &&
+              conversations.filter(
+                isUrgent
+              ).length > 0 && (
+                <View
+                  style={
+                    styles.tabDot
+                  }
+                />
+              )}
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+
+  const renderBottomBar = () => (
+    <View style={styles.bottomBar}>
+      <TouchableOpacity
+        style={styles.bottomItem}
+        onPress={() =>
+          onNavigate
+            ? onNavigate('ai')
+            : Alert.alert(
+                'AI',
+                'AI screen navigation is not connected yet.'
+              )
+        }
+      >
+        <Ionicons
+          name="sparkles-outline"
+          size={22}
+          color={COLORS.secondary}
+        />
+
+        <Text
+          style={styles.bottomText}
+        >
+          AI
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.bottomItem}
+        onPress={() =>
+          onNavigate
+            ? onNavigate('servers')
+            : Alert.alert(
+                'Servers',
+                'Servers screen navigation is not connected yet.'
+              )
+        }
+      >
+        <Ionicons
+          name="server-outline"
+          size={22}
+          color={COLORS.secondary}
+        />
+
+        <Text
+          style={styles.bottomText}
+        >
+          Servers
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.bottomItem,
+          styles.bottomItemActive,
+        ]}
+        onPress={() =>
+          setScreen('main')
+        }
+      >
+        <Ionicons
+          name="chatbubbles"
+          size={23}
+          color={COLORS.blueBright}
+        />
+
+        <Text
+          style={[
+            styles.bottomText,
+            styles.bottomTextActive,
+          ]}
+        >
+          Chat
+        </Text>
+
+        {unreadCount > 0 && (
           <View
             style={
-              styles.searchResultInfo
+              styles.bottomBadge
             }
           >
             <Text
               style={
-                styles.chatName
-              }
-              numberOfLines={
-                1
+                styles.bottomBadgeText
               }
             >
-              {searchResult.displayName ||
-                searchResult.username}
-            </Text>
-
-            <Text
-              style={
-                styles.chatMessage
-              }
-            >
-              @{searchResult.username}
+              {unreadCount > 9
+                ? '9+'
+                : unreadCount}
             </Text>
           </View>
+        )}
+      </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.bottomItem}
+        onPress={() =>
+          setScreen('search')
+        }
+      >
+        <Ionicons
+          name="search-outline"
+          size={22}
+          color={COLORS.secondary}
+        />
+
+        <Text
+          style={styles.bottomText}
+        >
+          Search
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.bottomItem}
+        onPress={() =>
+          onNavigate
+            ? onNavigate('profile')
+            : Alert.alert(
+                'Profile',
+                'Profile navigation is not connected yet.'
+              )
+        }
+      >
+        <Ionicons
+          name="person-outline"
+          size={22}
+          color={COLORS.secondary}
+        />
+
+        <Text
+          style={styles.bottomText}
+        >
+          Profile
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderCallModal = () => (
+    <Modal
+      visible={showCall}
+      animationType="slide"
+      onRequestClose={() =>
+        setShowCall(false)
+      }
+    >
+      <SafeAreaView
+        style={styles.callScreen}
+      >
+        <StatusBar style="light" />
+
+        <View
+          style={styles.callTop}
+        >
           <TouchableOpacity
-            style={
-              styles.smallActionButton
-            }
+            style={styles.iconButton}
             onPress={() =>
-              sendFriendRequest(
-                searchResult
+              setShowCall(false)
+            }
+          >
+            <Ionicons
+              name="close"
+              size={25}
+              color={COLORS.text}
+            />
+          </TouchableOpacity>
+
+          <Text
+            style={styles.callTitle}
+          >
+            {callMode === 'video'
+              ? 'Video Call'
+              : 'Voice Call'}
+          </Text>
+
+          <View
+            style={styles.iconButton}
+          />
+        </View>
+
+        <View
+          style={styles.callCenter}
+        >
+          <Avatar
+            name={getConversationName(
+              selectedConversation
+            )}
+          />
+
+          <Text
+            style={styles.callName}
+          >
+            {getConversationName(
+              selectedConversation
+            )}
+          </Text>
+
+          <Text
+            style={styles.callStatus}
+          >
+            Call UI only — real WebRTC
+            signaling/media is not
+            connected.
+          </Text>
+        </View>
+
+        <View
+          style={styles.callControls}
+        >
+          <TouchableOpacity
+            style={[
+              styles.callControl,
+              callMuted &&
+                styles.callControlActive,
+            ]}
+            onPress={() =>
+              setCallMuted(
+                value => !value
               )
             }
           >
-            <Feather
-              name="user-plus"
-              size={17}
+            <Ionicons
+              name={
+                callMuted
+                  ? 'mic-off'
+                  : 'mic'
+              }
+              size={24}
               color={
                 COLORS.text
               }
@@ -6073,398 +4734,1152 @@ export default function ChatScreen({
 
           <TouchableOpacity
             style={[
-              styles.smallActionButton,
-              styles.blueActionButton,
+              styles.callControl,
+              styles.callEnd,
             ]}
             onPress={() =>
-              sendDMRequest(
-                searchResult
-              )
+              setShowCall(false)
             }
           >
-            <Feather
-              name="message-circle"
-              size={17}
-              color={
-                COLORS.text
-              }
+            <Ionicons
+              name="call"
+              size={25}
+              color={COLORS.text}
             />
           </TouchableOpacity>
-        </View>
-      );
-    };
 
-
-  /* =========================================================
-     TABS
-  ========================================================= */
-
-  const renderTabs =
-    () => (
-      <View
-        style={
-          styles.tabContainer
-        }
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={
-            false
-          }
-          contentContainerStyle={
-            styles.tabScrollContent
-          }
-        >
-          {TABS.map(
-            (tab) => (
-              <TouchableOpacity
-                key={
-                  tab
+          {callMode === 'video' && (
+            <TouchableOpacity
+              style={
+                styles.callControl
+              }
+              onPress={() =>
+                Alert.alert(
+                  'Camera',
+                  'Real camera/WebRTC video is not connected yet.'
+                )
+              }
+            >
+              <Ionicons
+                name="videocam"
+                size={24}
+                color={
+                  COLORS.text
                 }
-                style={[
-                  styles.tabButton,
-                  activeTab ===
-                    tab &&
-                    styles.activeTabButton,
-                ]}
-                onPress={() =>
-                  setActiveTab(
-                    tab
-                  )
-                }
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab ===
-                      tab &&
-                      styles.activeTabText,
-                  ]}
-                >
-                  {tab}
-                </Text>
-
-                {tab ===
-                  'Groups' && (
-                  <TouchableOpacity
-                    style={
-                      styles.groupPlus
-                    }
-                    onPress={() =>
-                      setShowCreateGroup(
-                        true
-                      )
-                    }
-                  >
-                    <Feather
-                      name="plus"
-                      size={14}
-                      color={
-                        activeTab ===
-                        tab
-                          ? COLORS.text
-                          : COLORS.secondary
-                      }
-                    />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            )
+              />
+            </TouchableOpacity>
           )}
-        </ScrollView>
-      </View>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+
+  if (!uid) {
+    return (
+      <SafeAreaView
+        style={styles.safeArea}
+      >
+        <StatusBar style="light" />
+
+        <EmptyState
+          icon="person-circle-outline"
+          title="Sign in required"
+          text="Please sign in to use Shinzi Chat."
+        />
+      </SafeAreaView>
     );
+  }
 
+  if (screen === 'conversation') {
+    return (
+      <>
+        {renderConversationScreen()}
+        {renderAttachmentMenu()}
+        {renderPollCreator()}
+        {renderEventCreator()}
+        {renderGifPanel()}
+        {renderCallModal()}
+      </>
+    );
+  }
 
-  /* =========================================================
-     FILTERED CONVERSATIONS
-  ========================================================= */
+  if (screen === 'friends') {
+    return renderFriendsScreen();
+  }
 
-  const filteredConversations =
-    useMemo(() => {
-      let result =
-        [
-          ...conversations,
-        ];
+  if (screen === 'friendRequests') {
+    return renderFriendRequestsScreen();
+  }
 
-      const search =
-        searchQuery
-          .trim()
-          .toLowerCase();
+  if (screen === 'dmRequests') {
+    return renderDMRequestsScreen();
+  }
 
-      if (search) {
-        result =
-          result.filter(
-            (
-              conversation
-            ) => {
-              const title =
-                getConversationTitle(
-                  conversation
-                ).toLowerCase();
+  if (screen === 'search') {
+    return renderSearchScreen();
+  }
 
-              const username =
-                getConversationUsername(
-                  conversation
-                ).toLowerCase();
+  return (
+    <SafeAreaView
+      style={styles.safeArea}
+    >
+      <StatusBar style="light" />
 
-              const lastMessage =
-                String(
-                  conversation.lastMessage ||
-                    ''
-                ).toLowerCase();
+      {renderMainHeader()}
 
-              return (
-                title.includes(
-                  search
-                ) ||
-                username.includes(
-                  search
-                ) ||
-                lastMessage.includes(
-                  search
-                )
-              );
-            }
-          );
-      }
+      {renderSearchBar()}
 
-      if (
-        activeTab ===
-        'Recent'
-      ) {
-        result =
-          result.filter(
-            (
-              conversation
-            ) =>
-              !!conversation.lastMessageAt
-          );
+      {renderTabs()}
 
-        result.sort(
-          (a, b) =>
-            timestampToMillis(
-              b.lastMessageAt
-            ) -
-            timestampToMillis(
-              a.lastMessageAt
-            )
-        );
+      {renderConversationList()}
 
-        return result;
-      }
-
-      if (
-        activeTab ===
-        'Urgent'
-      ) {
-        result =
-          result.filter(
-            isUrgent
-          );
-      }
-
-      if (
-        activeTab ===
-        'Favorite'
-      ) {
-        result =
-          result.filter(
-            isFavorite
-          );
-      }
-
-      if (
-        activeTab ===
-        'Groups'
-      ) {
-        result =
-          result.filter(
-            (
-              conversation
-            ) =>
-              conversation.type ===
-              'group'
-          );
-      }
-
-      result.sort(
-        (a, b) => {
-          const rank =
-            (conversation) => {
-              if (
-                isUrgent(
-                  conversation
-                )
-              ) {
-                return 1;
-              }
-
-              if (
-                isFavorite(
-                  conversation
-                )
-              ) {
-                return 2;
-              }
-
-              return 3;
-            };
-
-          return (
-            rank(a) -
-              rank(b) ||
-            timestampToMillis(
-              b.lastMessageAt
-            ) -
-              timestampToMillis(
-                a.lastMessageAt
-              )
-          );
-        }
-      );
-
-      return result;
-    }, [
-      conversations,
-      activeTab,
-      searchQuery,
-      currentUser?.uid,
-    ]);
-
-
-  /* =========================================================
-     CONVERSATION CARD
-  ========================================================= */
-
-  const renderConversation =
-    ({
-      item,
-    }) => {
-      const title =
-        getConversationTitle(
-          item
-        );
-
-      const username =
-        getConversationUsername(
-          item
-        );
-
-      const urgent =
-        isUrgent(item);
-
-      const favorite =
-        isFavorite(item);
-
-      const lastMessage =
-        item.lastMessage ||
-        (
-          item.type ===
-          'group'
-            ? 'Group created'
-            : 'Start chatting'
-        );
-
-      return (
+      <View
+        style={styles.quickActions}
+      >
         <TouchableOpacity
-          style={[
-            styles.chatCard,
-            urgent &&
-              styles.urgentChatCard,
-          ]}
-          activeOpacity={
-            0.75
-          }
+          style={styles.quickAction}
           onPress={() =>
-            openConversation(
-              item
-            )
+            setScreen('friends')
           }
         >
-          <Avatar
-            name={
-              title
-            }
-            group={
-              item.type ===
-              'group'
+          <Ionicons
+            name="people-outline"
+            size={20}
+            color={
+              COLORS.blueBright
             }
           />
 
-          <View
+          <Text
             style={
-              styles.chatInfo
+              styles.quickActionText
             }
           >
-            <View
-              style={
-                styles.chatTitleRow
-              }
-            >
-              <Text
-                style={
-                  styles.chatName
-                }
-                numberOfLines={
-                  1
-                }
-              >
-                {title}
-              </Text>
+            Friends
+          </Text>
+        </TouchableOpacity>
 
-              {item.type ===
-                'group' && (
-                <Text
-                  style={
-                    styles.groupLabel
-                  }
-                >
-                  GROUP
-                </Text>
-              )}
-            </View>
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() =>
+            setScreen(
+              'friendRequests'
+            )
+          }
+        >
+          <Ionicons
+            name="person-add-outline"
+            size={20}
+            color={
+              COLORS.green
+            }
+          />
 
-            <Text
-              style={
-                styles.chatUsername
-              }
-              numberOfLines={
-                1
-              }
-            >
-              {username}
-            </Text>
-
-            <Text
-              style={
-                styles.chatMessage
-              }
-              numberOfLines={
-                1
-              }
-            >
-              {
-                lastMessage
-              }
-            </Text>
-          </View>
-
-          <View
+          <Text
             style={
-              styles.chatMeta
+              styles.quickActionText
             }
           >
-            <Text
-              style={
-                styles.timeText
-              }
-            >
-              {formatTime(
-                item.lastMessageAt
-              )}
-            </Text>
+            Requests
+          </Text>
 
-            <View
-              style={
- 
+          {friendRequests.length >
+            0 && (
+            <Badge
+              count={
+                friendRequests.length
+              }
+            />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() =>
+            setScreen(
+              'dmRequests'
+            )
+          }
+        >
+          <Ionicons
+            name="mail-outline"
+            size={20}
+            color={
+              COLORS.yellow
+            }
+          />
+
+          <Text
+            style={
+              styles.quickActionText
+            }
+          >
+            DM
+          </Text>
+
+          {dmRequests.length >
+            0 && (
+            <Badge
+              count={
+                dmRequests.length
+              }
+            />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {renderBottomBar()}
+      {renderModesModal()}
+      {renderGroupModal()}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+  },
+
+  mainHeader: {
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.background,
+  },
+
+  headerTitle: {
+    color: COLORS.text,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+
+  headerSubtitle: {
+    color: COLORS.secondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+
+  headerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  headerBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 2,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: COLORS.urgent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerBadgeText: {
+    color: COLORS.text,
+    fontSize: 8,
+    fontWeight: '900',
+  },
+
+  topSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    gap: 8,
+    marginBottom: 7,
+  },
+
+  topSearch: {
+    flex: 1,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+
+  topSearchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 15,
+    marginLeft: 8,
+    paddingVertical: 7,
+  },
+
+  searchUsersButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  tabsContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 8,
+  },
+
+  tab: {
+    minWidth: 76,
+    height: 37,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    gap: 5,
+  },
+
+  tabActive: {
+    backgroundColor: COLORS.card2,
+    borderColor: COLORS.blue,
+  },
+
+  tabText: {
+    color: COLORS.secondary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  tabTextActive: {
+    color: COLORS.blueBright,
+  },
+
+  tabDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.urgent,
+  },
+
+  conversationList: {
+    paddingHorizontal: 10,
+    paddingBottom: 120,
+  },
+
+  conversationRow: {
+    minHeight: 74,
+    paddingHorizontal: 7,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: COLORS.card2,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  avatarSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.card2,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  avatarText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+
+  avatarSmallText: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  conversationContent: {
+    flex: 1,
+    marginLeft: 11,
+    minWidth: 0,
+  },
+
+  conversationTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  conversationName: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  conversationNameUnread: {
+    fontWeight: '900',
+  },
+
+  conversationTime: {
+    color: COLORS.secondary,
+    fontSize: 11,
+    marginLeft: 8,
+  },
+
+  conversationBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+
+  conversationPreview: {
+    flex: 1,
+    color: COLORS.secondary,
+    fontSize: 13,
+  },
+
+  conversationPreviewUnread: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+
+  conversationIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 8,
+  },
+
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.blueBright,
+  },
+
+  badge: {
+    minWidth: 19,
+    height: 19,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: COLORS.urgent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  badgeText: {
+    color: COLORS.text,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+
+  emptyState: {
+    flex: 1,
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 35,
+  },
+
+  emptyTitle: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 13,
+    textAlign: 'center',
+  },
+
+  emptyText: {
+    color: COLORS.secondary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+
+  quickActions: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 67,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingHorizontal: 5,
+  },
+
+  quickAction: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+  },
+
+  quickActionText: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 65,
+    backgroundColor: '#08080D',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingBottom: Platform.OS === 'ios' ? 5 : 0,
+  },
+
+  bottomItem: {
+    minWidth: 55,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  bottomItemActive: {
+    backgroundColor: '#101019',
+    borderRadius: 15,
+    paddingHorizontal: 9,
+  },
+
+  bottomText: {
+    color: COLORS.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+
+  bottomTextActive: {
+    color: COLORS.blueBright,
+  },
+
+  bottomBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 5,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: COLORS.urgent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  bottomBadgeText: {
+    color: COLORS.text,
+    fontSize: 8,
+    fontWeight: '900',
+  },
+
+  backHeader: {
+    height: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  backHeaderTitle: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 19,
+    fontWeight: '900',
+    marginLeft: 5,
+  },
+
+  backHeaderRight: {
+    width: 42,
+    alignItems: 'center',
+  },
+
+  listContent: {
+    padding: 12,
+    paddingBottom: 30,
+  },
+
+  personRow: {
+    minHeight: 70,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+  },
+
+  personInfo: {
+    flex: 1,
+    marginLeft: 11,
+  },
+
+  personName: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  personUsername: {
+    color: COLORS.secondary,
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  requestCard: {
+    minHeight: 76,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    padding: 10,
+    marginBottom: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  requestInfo: {
+    flex: 1,
+    marginLeft: 10,
+  },
+
+  requestActions: {
+    flexDirection: 'row',
+    gap: 7,
+  },
+
+  acceptButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  rejectButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  searchPageContainer: {
+    flex: 1,
+    padding: 14,
+  },
+
+  searchInputWrap: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+
+  searchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 15,
+    marginHorizontal: 9,
+  },
+
+  searchResultCard: {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  searchResultInfo: {
+    flex: 1,
+    marginLeft: 11,
+  },
+
+  searchResultActions: {
+    flexDirection: 'row',
+    gap: 5,
+  },
+
+  smallActionButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.card2,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  chatHeader: {
+    minHeight: 61,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingHorizontal: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  chatHeaderInfo: {
+    flex: 1,
+    marginLeft: 8,
+    marginRight: 3,
+  },
+
+  chatHeaderName: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  chatHeaderSubtitle: {
+    color: COLORS.secondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  messagesContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 13,
+    paddingBottom: 15,
+    flexGrow: 1,
+  },
+
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    gap: 6,
+  },
+
+  messageRowOwn: {
+    justifyContent: 'flex-end',
+  },
+
+  messageBubble: {
+    maxWidth: '82%',
+    backgroundColor: COLORS.card2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 17,
+    borderBottomLeftRadius: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  messageBubbleOwn: {
+    backgroundColor: '#15384A',
+    borderColor: '#23566D',
+    borderBottomLeftRadius: 17,
+    borderBottomRightRadius: 5,
+  },
+
+  messageText: {
+    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+
+  messageTextOwn: {
+    color: COLORS.text,
+  },
+
+  messageSender: {
+    color: COLORS.blueBright,
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+
+  messageMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 3,
+    marginTop: 4,
+  },
+
+  messageTime: {
+    color: COLORS.secondary,
+    fontSize: 9,
+  },
+
+  messageTimeOwn: {
+    color: '#A4CFE2',
+    fontSize: 9,
+  },
+
+  deletedBubble: {
+    backgroundColor: COLORS.card,
+    borderStyle: 'dashed',
+  },
+
+  deletedText: {
+    color: COLORS.secondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+
+  typingBar: {
+    minHeight: 30,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+
+  typingDots: {
+    flexDirection: 'row',
+    gap: 3,
+  },
+
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.secondary,
+  },
+
+  typingText: {
+    color: COLORS.secondary,
+    fontSize: 11,
+  },
+
+  recordingBar: {
+    minHeight: 43,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  recordingIndicator: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: COLORS.red,
+    marginRight: 8,
+  },
+
+  recordingText: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  recordingStop: {
+    color: COLORS.red,
+    fontWeight: '800',
+  },
+
+  composer: {
+    minHeight: 57,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 5,
+  },
+
+  composerIcon: {
+    width: 39,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  messageInput: {
+    flex: 1,
+    maxHeight: 120,
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 21,
+    backgroundColor: COLORS.card,
+    color: COLORS.text,
+    fontSize: 15,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+  },
+
+  sendButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  sendButtonDisabled: {
+    opacity: 0.35,
+  },
+
+  characterCounter: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 14,
+    paddingBottom: 3,
+    backgroundColor: COLORS.background,
+  },
+
+  characterCounterText: {
+    color: COLORS.secondary,
+    fontSize: 9,
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'flex-end',
+  },
+
+  modeModal: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 23,
+    borderTopRightRadius: 23,
+    padding: 16,
+    paddingBottom: 25,
+  },
+
+  groupModal: {
+    height: '82%',
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 23,
+    borderTopRightRadius: 23,
+    padding: 16,
+  },
+
+  attachmentModal: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 23,
+    borderTopRightRadius: 23,
+    padding: 16,
+    paddingBottom: 25,
+  },
+
+  creatorModal: {
+    maxHeight: '88%',
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 23,
+    borderTopRightRadius: 23,
+    padding: 16,
+  },
+
+  gifModal: {
+    height: '78%',
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 23,
+    borderTopRightRadius: 23,
+    padding: 16,
+  },
+
+  modalHeader: {
+    minHeight: 43,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+
+  modalTitle: {
+    color: COLORS.text,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+
+  modeRow: {
+    minHeight: 68,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 15,
+    backgroundColor: COLORS.card2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    marginTop: 9,
+  },
+
+  modeIcon: {
+    width: 45,
+    height: 45,
+    borderRadius: 13,
+    backgroundColor: COLORS.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  modeTextWrap: {
+    flex: 1,
+    marginLeft: 11,
+  },
+
+  modeTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  modeSubtitle: {
+    color: COLORS.secondary,
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  modalInput: {
+    minHeight: 45,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.card2,
+    color: COLORS.text,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    marginBottom: 9,
+  },
+
+  multilineInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+
+  sectionLabel: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 3,
+    marginBottom: 7,
+  },
+
+  friendPicker: {
+    flex: 1,
+    marginBottom: 7,
+  },
+
+  friendPickerRow: {
+    minHeight: 60,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+  },
+
+  friendPickerInfo: {
+    flex: 1,
+    marginLeft: 9,
+  },
+
+  friendPickerName: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  friendPickerUsername: {
+    color: COLORS.secondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  addButton: {
+    minWidth: 62,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+
+  addButtonActive: {
+    backgroundColor: COLORS.green,
+    borderColor: COLORS.green,
+  },
+
+  addButtonText: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  addedCount: {
+    color: COLORS.secondary,
+    fon
